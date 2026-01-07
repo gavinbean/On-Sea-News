@@ -1,0 +1,58 @@
+# Configuration files with sensitive data
+config/database.php
+config/geocoding.php
+config/base-config.php
+
+# Uploads directory
+uploads/*
+!uploads/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# PHP specific
+vendor/
+composer.lock
+
+# Node modules (if any)
+node_modules/
+package-lock.json
+
+# Cache
+cache/
+tmp/
+
+# Database dumps
+*.sql.gz
+*.sql.bak
+
+# PDF files (if they contain sensitive info)
+*.pdf
+
+# CDR files
+*.cdr
+
