@@ -10,3 +10,4 @@ ALTER TABLE `bk_businesses`
 MODIFY COLUMN `address` TEXT NULL;
 
 
+

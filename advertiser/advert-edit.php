@@ -48,7 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (file_exists(__DIR__ . '/../' . $advert['advert_image'])) {
                     unlink(__DIR__ . '/../' . $advert['advert_image']);
                 }
-                $uploadedFile = 'uploads/adverts/' . $newFileName;
+                $uploadedFile = 'uploads/graphics/' . $newFileName;
             }
         }
     }

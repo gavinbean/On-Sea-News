@@ -21,23 +21,23 @@
 
 /* Exception: Lists need padding for indentation - MUST come immediately after reset */
 /* Exclude navigation menus and other UI lists */
-ul:not(.nav-menu):not(.profile-dropdown):not(.business-menu):not(.business-submenu),
-ol:not(.nav-menu):not(.profile-dropdown):not(.business-menu):not(.business-submenu) {
+ul:not(.nav-menu):not(.profile-dropdown):not(.business-menu):not(.business-submenu):not(.water-submenu),
+ol:not(.nav-menu):not(.profile-dropdown):not(.business-menu):not(.business-submenu):not(.water-submenu) {
     padding-left: 40px !important; /* Use pixels for more reliable rendering */
     margin: 1rem 0 !important;
 }
 
-ul:not(.nav-menu):not(.profile-dropdown):not(.business-menu):not(.business-submenu) {
+ul:not(.nav-menu):not(.profile-dropdown):not(.business-menu):not(.business-submenu):not(.water-submenu) {
     list-style-type: disc !important;
     list-style-position: outside !important;
 }
 
-ol:not(.nav-menu):not(.profile-dropdown):not(.business-menu):not(.business-submenu) {
+ol:not(.nav-menu):not(.profile-dropdown):not(.business-menu):not(.business-submenu):not(.water-submenu) {
     list-style-type: decimal !important;
     list-style-position: outside !important;
 }
 
-li:not(.nav-menu li):not(.profile-dropdown-item):not(.business-menu li):not(.business-submenu li) {
+li:not(.nav-menu li):not(.profile-dropdown-item):not(.business-menu li):not(.business-submenu li):not(.water-submenu li) {
     display: list-item !important;
     margin-left: 0 !important;
     padding-left: 0 !important;
@@ -94,13 +94,16 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     color: var(--text-color);
     background-color: var(--bg-color);
-    background-image: url('../images/backgrounds/kenton-watermark.png'), url('../images/backgrounds/bushmans-watermark.png');
-    background-position: top left, bottom right;
-    background-repeat: no-repeat, no-repeat;
-    background-size: 400px auto, 400px auto;
-    background-attachment: fixed;
+    /* Background images removed - explicitly set to none to override any cached styles */
+    background-image: none !important;
+    background-position: initial !important;
+    background-repeat: no-repeat !important;
+    background-size: auto !important;
+    background-attachment: scroll !important;
     line-height: 1.6;
     position: relative;
+    margin: 0; /* Remove default body margin */
+    padding-top: 0; /* Remove default padding */
 }
 
 /* Watermark overlay for better readability - subtle overlay */
@@ -127,8 +130,63 @@ body::before {
     background-color: var(--white);
     box-shadow: var(--shadow);
     position: sticky;
-    top: 0;
+    top: 68px; /* Position directly below fixed top banner (68px height) */
     z-index: 1000;
+    /* Prevent header from expanding when dropdowns appear */
+    overflow: visible;
+    margin: 0; /* Remove any default margins */
+    margin-top: 0 !important; /* Ensure no gap between top banner and header */
+    padding-top: 0 !important; /* Remove any top padding */
+    border-top: none !important; /* Remove any top border */
+}
+
+/* Position header below fixed top banner on all screen sizes */
+body:has(.top-banner-container) .main-header {
+    top: 68px !important; /* Height of top banner (60px + 8px padding) */
+    margin-top: 0 !important; /* No gap between top banner and header */
+    padding-top: 0 !important; /* No padding at top */
+    border-top: none !important; /* No border at top */
+}
+
+/* Add padding to body on desktop to prevent content from being hidden behind fixed top banner and header */
+@media (min-width: 769px) {
+    body:has(.top-banner-container) {
+        padding-top: 140px; /* Banner (68px) + Header (approximately 72px) */
+    }
+    
+    /* Ensure no gap between top banner and header on desktop */
+    body:has(.top-banner-container) .main-header {
+        margin-top: 0 !important;
+        padding-top: 0 !important;
+        border-top: none !important; /* No border at top */
+    }
+    
+    /* Ensure header-top has no top margin/padding when banner is present */
+    body:has(.top-banner-container) .header-top {
+        margin-top: 0 !important;
+    }
+    
+    .top-banner-container {
+        margin-bottom: 0 !important;
+    }
+    
+    /* Remove any spacing from container inside top banner on desktop */
+    .top-banner-container > .container {
+        margin: 0 auto !important; /* Center the container */
+        padding: 0 20px !important; /* Horizontal padding only */
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center; /* Center the content */
+        width: 100%;
+        max-width: 1200px; /* Match base container max-width */
+    }
+}
+
+.main-nav {
+    overflow: visible;
 }
 
 .header-top {
@@ -137,6 +195,77 @@ body::before {
     align-items: center;
     padding: 1rem 0 0 0;
     border-bottom: 1px solid var(--border-color);
+    gap: 1rem;
+    margin-top: 0 !important; /* Ensure no margin at top */
+    overflow: visible; /* Allow dropdowns to extend beyond */
+}
+
+/* When top banner is present, ensure header-top has no top spacing */
+body:has(.top-banner-container) .header-top {
+    margin-top: 0 !important;
+}
+
+/* Admin Notification Icons */
+.admin-notifications {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin: 0 1rem;
+}
+
+.admin-notification-icon {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary-color);
+    font-size: 1.5rem;
+    padding: 0.5rem;
+    text-decoration: none;
+    transition: transform 0.2s, color 0.2s;
+    border-radius: 4px;
+}
+
+.admin-notification-icon:hover {
+    transform: scale(1.1);
+    color: var(--secondary-color);
+    background-color: var(--bg-color);
+}
+
+.notification-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background-color: #d32f2f;
+    color: white;
+    border-radius: 50%;
+    min-width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: bold;
+    padding: 0 4px;
+    border: 2px solid white;
+}
+
+@media (max-width: 768px) {
+    .admin-notifications {
+        gap: 0.5rem;
+        margin: 0 0.5rem;
+    }
+    
+    .admin-notification-icon {
+        font-size: 1.25rem;
+        padding: 0.25rem;
+    }
+    
+    .notification-badge {
+        min-width: 18px;
+        height: 18px;
+        font-size: 0.7rem;
+    }
 }
 
 .logo {
@@ -170,6 +299,7 @@ body::before {
     display: flex;
     align-items: center;
     gap: 1rem;
+    overflow: visible; /* Allow dropdowns to extend beyond */
 }
 
 /* Add to Home Screen Button */
@@ -261,10 +391,12 @@ body::before {
 /* Profile Icon */
 .profile-icon-container {
     position: relative;
+    z-index: 1002; /* Ensure it's above header */
 }
 
 .profile-icon-wrapper {
     position: relative;
+    z-index: 1002; /* Ensure dropdown is above other elements */
 }
 
 .profile-icon-btn {
@@ -286,7 +418,7 @@ body::before {
 }
 
 .profile-dropdown {
-    display: none;
+    display: block; /* Always in document flow */
     position: absolute;
     top: 100%;
     right: 0;
@@ -296,11 +428,17 @@ body::before {
     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     min-width: 150px;
     margin-top: 0.5rem;
-    z-index: 1001;
+    z-index: 1002; /* Increased to ensure it's above header and other elements */
+    visibility: hidden; /* Hidden by default */
+    opacity: 0;
+    pointer-events: none; /* Prevent interaction when hidden */
+    transition: opacity 0.2s ease, visibility 0.2s ease;
 }
 
 .profile-dropdown.show {
-    display: block;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important; /* Allow interaction when shown */
 }
 
 .profile-dropdown-item {
@@ -332,6 +470,8 @@ body::before {
 .main-nav {
     position: relative;
     padding: 0.75rem 0;
+    /* Ensure nav doesn't expand with dropdowns */
+    overflow: visible;
 }
 
 .hamburger {
@@ -342,6 +482,11 @@ body::before {
     cursor: pointer;
     padding: 0.5rem;
     margin: 0;
+    order: -1; /* Place before logo on mobile */
+    flex-shrink: 0; /* Prevent shrinking */
+    z-index: 1001; /* Ensure it's above other elements */
+    position: relative; /* Create stacking context */
+    pointer-events: auto !important; /* Ensure clicks work */
 }
 
 .hamburger span {
@@ -355,17 +500,31 @@ body::before {
 .nav-menu {
     display: flex;
     list-style: none !important;
-    align-items: center;
+    align-items: flex-start;
     gap: 1.5rem;
     padding-left: 0 !important;
     margin: 0 !important;
+    /* Prevent flex items from shifting when dropdowns appear */
+    align-content: flex-start;
+    /* Prevent menu from expanding when dropdowns appear - fixed height */
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    /* Allow dropdowns to extend beyond */
+    overflow: visible;
+    /* Prevent layout shifts */
+    contain: layout;
 }
 
 .nav-menu li {
-    display: list-item !important;
     list-style: none !important;
     margin: 0 !important;
     padding: 0 !important;
+    /* Fixed height to prevent bouncing */
+    height: auto;
+    min-height: 1.5rem;
+    /* Prevent layout shifts from absolutely positioned dropdowns */
+    position: relative;
 }
 
 .nav-menu a {
@@ -373,6 +532,14 @@ body::before {
     color: var(--text-color);
     font-weight: 500;
     transition: color 0.3s;
+    display: block;
+    line-height: 1.5;
+    padding: 0;
+}
+
+/* Override for water menu toggle to keep icon inline */
+.water-menu-toggle {
+    display: inline-block !important;
 }
 
 .nav-menu a:hover {
@@ -450,6 +617,115 @@ body::before {
     background-color: var(--bg-color);
 }
 
+/* Water Menu Dropdown - exact same pattern as business menu */
+.water-menu-item {
+    position: relative;
+    /* Prevent layout shifts - fixed dimensions */
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+    /* Ensure it doesn't expand in flex container */
+    flex: 0 0 auto;
+    align-self: flex-start;
+}
+
+.water-menu-toggle {
+    cursor: pointer;
+    white-space: nowrap;
+    display: inline-block;
+}
+
+.water-menu-toggle i {
+    font-size: 0.75rem;
+    margin-left: 0.5rem;
+    transition: transform 0.3s;
+    display: inline;
+    vertical-align: baseline;
+}
+
+.water-menu-item:hover .water-menu-toggle i {
+    transform: rotate(180deg);
+}
+
+.water-submenu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    background-color: var(--white);
+    box-shadow: var(--shadow);
+    min-width: 200px;
+    list-style: none !important;
+    z-index: 1001;
+    padding: 0.5rem 0;
+    margin: 0;
+    white-space: nowrap;
+    /* Ensure it doesn't affect layout - completely out of flow */
+    pointer-events: none;
+    visibility: hidden;
+    opacity: 0;
+    /* Remove from document flow completely */
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+/* Desktop - JavaScript handles display with delay, CSS provides fallback */
+@media (min-width: 769px) {
+    .water-submenu {
+        position: absolute !important;
+        transition: opacity 0.1s ease;
+        /* Ensure it's completely out of flow */
+        top: 100% !important;
+        left: 0 !important;
+        /* Overlap to eliminate gap - override base margin */
+        margin-top: -0.25rem !important;
+        padding-top: 0.75rem !important;
+    }
+    
+    /* CSS fallback hover - will be overridden by JavaScript if it works */
+    .water-menu-item:hover .water-submenu {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        position: absolute !important;
+    }
+    
+    .water-submenu:hover {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        position: absolute !important;
+    }
+    
+    /* Ensure submenu links are clickable */
+    .water-submenu a {
+        pointer-events: auto !important;
+        cursor: pointer;
+        display: block;
+    }
+}
+
+.water-submenu li {
+    margin: 0;
+    padding: 0;
+}
+
+.water-submenu a {
+    display: block;
+    padding: 0.75rem 1rem;
+    text-decoration: none;
+    color: var(--text-color);
+    transition: background-color 0.3s;
+}
+
+.water-submenu a:hover {
+    background-color: var(--bg-color);
+    color: var(--primary-color);
+}
+
 /* Main Content */
 .main-content {
     min-height: calc(100vh - 200px);
@@ -512,8 +788,28 @@ body::before {
 .profile-tabs {
     display: flex;
     gap: 0.5rem;
-    margin-bottom: 1.5rem;
+    margin-bottom: 2rem;
     border-bottom: 2px solid var(--border-color);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+}
+
+.profile-tabs::-webkit-scrollbar {
+    height: 6px;
+}
+
+.profile-tabs::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+.profile-tabs::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 3px;
+}
+
+.profile-tabs::-webkit-scrollbar-thumb:hover {
+    background: #555;
 }
 
 .tab-button {
@@ -526,6 +822,8 @@ body::before {
     color: #666;
     transition: all 0.3s;
     margin-bottom: -2px;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .tab-button:hover {
@@ -539,6 +837,31 @@ body::before {
     font-weight: 600;
 }
 
+/* Mobile optimizations for profile tabs */
+@media (max-width: 768px) {
+    .profile-tabs {
+        gap: 0.25rem;
+        margin-bottom: 1.5rem;
+        padding-bottom: 0.5rem;
+    }
+    
+    .profile-tabs .tab-button {
+        padding: 0.6rem 1rem;
+        font-size: 0.9rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .profile-tabs {
+        gap: 0.2rem;
+    }
+    
+    .profile-tabs .tab-button {
+        padding: 0.5rem 0.6rem;
+        font-size: 0.85rem;
+    }
+}
+
 .tab-content {
     display: none;
 }
@@ -550,7 +873,7 @@ body::before {
 .tab-navigation {
     display: flex;
     gap: 1rem;
-    justify-content: space-between;
+    justify-content: flex-start;
     margin-top: 2rem;
     padding-top: 1.5rem;
     border-top: 1px solid var(--border-color);
@@ -588,6 +911,8 @@ body::before {
 .form-group input[type="email"],
 .form-group input[type="password"],
 .form-group input[type="tel"],
+.form-group input[type="date"],
+.form-group input[type="number"],
 .form-group textarea,
 .form-group select {
     width: 100%;
@@ -697,6 +1022,34 @@ body::before {
     background-color: var(--bg-color);
 }
 
+.address-suggestions {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background-color: var(--white);
+    border: 1px solid var(--border-color);
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 1000;
+    margin-top: -1px;
+}
+
+.address-suggestion {
+    padding: 0.75rem;
+    cursor: pointer;
+    border-bottom: 1px solid var(--bg-color);
+    transition: background-color 0.2s;
+}
+
+.address-suggestion:hover {
+    background-color: var(--bg-color);
+}
+
 .autocomplete-item:last-child {
     border-bottom: none;
 }
@@ -798,6 +1151,192 @@ body::before {
     gap: 2rem;
 }
 
+/* Featured/Pinned News Section */
+.featured-news-section {
+    margin-bottom: 3rem;
+}
+
+.section-title {
+    font-size: 1.75rem;
+    font-weight: 600;
+    color: var(--primary-color);
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.featured-news-grid {
+    display: grid;
+    gap: 2rem;
+}
+
+.featured-news-item {
+    background-color: var(--white);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.featured-news-image {
+    width: 100%;
+    height: 300px;
+    overflow: hidden;
+    background-color: #f0f0f0;
+}
+
+.featured-news-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+}
+
+.featured-news-image:hover img {
+    transform: scale(1.05);
+}
+
+.featured-news-item .news-item-header {
+    padding: 1.5rem;
+    background: linear-gradient(135deg, var(--primary-color) 0%, #1a4d7a 100%);
+    color: white;
+}
+
+.featured-news-item .news-item-header h2 {
+    margin: 0.5rem 0 0 0;
+}
+
+.featured-news-item .news-item-header h2 a {
+    color: white;
+    text-decoration: none;
+}
+
+.featured-news-item .news-item-header h2 a:hover {
+    text-decoration: underline;
+}
+
+.pinned-badge {
+    display: inline-block;
+    background-color: rgba(255, 255, 255, 0.2);
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.featured-news-item .news-item-content {
+    padding: 1.5rem;
+    flex-grow: 1;
+}
+
+/* Regular News Grid */
+.regular-news-section {
+    margin-top: 2rem;
+}
+
+.news-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+}
+
+@media (min-width: 768px) {
+    .news-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .featured-news-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (min-width: 1024px) {
+    .news-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+    
+    .featured-news-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 767px) {
+    .featured-news-image {
+        height: 250px;
+    }
+    
+    .news-item-image {
+        height: 180px;
+    }
+    
+    .section-title {
+        font-size: 1.5rem;
+    }
+    
+    .featured-news-item .news-item-header h2 {
+        font-size: 1.5rem;
+    }
+}
+
+.regular-news-item {
+    background-color: var(--white);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.regular-news-item:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.news-item-image {
+    width: 100%;
+    height: 200px;
+    overflow: hidden;
+    background-color: #f0f0f0;
+}
+
+.news-item-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+}
+
+.news-item-image:hover img {
+    transform: scale(1.05);
+}
+
+.regular-news-item .news-item-header {
+    padding: 1.25rem;
+}
+
+.regular-news-item .news-item-header h3 {
+    margin: 0;
+    font-size: 1.25rem;
+}
+
+.regular-news-item .news-item-header h3 a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.regular-news-item .news-item-header h3 a:hover {
+    text-decoration: underline;
+}
+
+.regular-news-item .news-item-content {
+    padding: 0 1.25rem 1.25rem;
+    flex-grow: 1;
+    font-size: 0.95rem;
+}
+
 .news-item {
     background-color: var(--white);
     border-radius: 8px;
@@ -829,6 +1368,44 @@ body::before {
     height: auto;
     border-radius: 4px;
     margin: 1rem 0;
+}
+
+/* Image wrapping styles for news content */
+.news-item-content img.float-left,
+.news-content img.float-left {
+    float: left;
+    margin: 0 1rem 1rem 0;
+    max-width: 50%;
+}
+
+.news-item-content img.float-right,
+.news-content img.float-right {
+    float: right;
+    margin: 0 0 1rem 1rem;
+    max-width: 50%;
+}
+
+.news-item-content img.center-image,
+.news-content img.center-image {
+    display: block;
+    margin: 1rem auto;
+    max-width: 100%;
+}
+
+.news-item-content img.full-width,
+.news-content img.full-width {
+    width: 100%;
+    height: auto;
+    display: block;
+    margin: 1rem 0;
+}
+
+/* Clear floats after images */
+.news-item-content::after,
+.news-content::after {
+    content: "";
+    display: table;
+    clear: both;
 }
 
 /* Force list indentation in news content - must override global reset */
@@ -1028,11 +1605,11 @@ div.news-content ol,
 
 /* Footer */
 .main-footer {
-    margin-bottom: 90px; /* Space for fixed ad banner */
     background-color: var(--white);
     border-top: 1px solid var(--border-color);
     padding: 2rem 0;
     margin-top: 4rem;
+    margin-bottom: 0; /* Remove bottom margin - body padding handles spacing */
     text-align: center;
     color: #666;
 }
@@ -1201,10 +1778,19 @@ div.news-content ol,
     
     .hamburger {
         display: flex;
-        align-self: flex-start;
         margin: 0;
         padding: 0.5rem;
         position: relative;
+        order: -1; /* Ensure it's before logo */
+    }
+    
+    .header-top {
+        gap: 0.5rem;
+    }
+    
+    .logo {
+        flex: 1; /* Allow logo to take remaining space */
+        min-width: 0; /* Allow logo to shrink if needed */
     }
     
     .nav-menu {
@@ -1222,6 +1808,10 @@ div.news-content ol,
         margin: 0;
         transform: none;
         list-style: none !important;
+        max-height: calc(100vh - 100px);
+        overflow-y: auto;
+        overflow-x: hidden;
+        -webkit-overflow-scrolling: touch;
     }
     
     /* Align menu with hamburger button on mobile */
@@ -1243,6 +1833,10 @@ div.news-content ol,
             list-style: none !important;
             padding-left: 0 !important;
             margin-left: 0 !important;
+            max-height: calc(100vh - 100px) !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            -webkit-overflow-scrolling: touch !important;
         }
         
         .nav-menu li {
@@ -1269,7 +1863,7 @@ div.news-content ol,
     }
     
     .nav-menu.active {
-        display: flex;
+        display: flex !important;
     }
     
     .main-content.has-sidebar {
@@ -1431,6 +2025,53 @@ div.news-content ol,
         position: static;
         box-shadow: none;
         margin-left: 1rem;
+    }
+    
+    .water-menu-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+    }
+    
+    .water-submenu {
+        position: static !important;
+        margin-left: 2rem !important;
+        margin-top: 0.5rem;
+        padding-left: 1rem;
+        padding-top: 0.5rem;
+        padding-bottom: 0.5rem;
+        border-left: 3px solid var(--primary-color);
+        background-color: var(--bg-color);
+        /* Don't use !important here - let active state override */
+        display: none;
+        visibility: hidden;
+        opacity: 0;
+        pointer-events: none;
+    }
+    
+    /* Active state - must come after and override base state */
+    .water-menu-item.active .water-submenu,
+    .nav-menu .water-menu-item.active .water-submenu,
+    .water-menu-item.active .water-submenu {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        position: static !important;
+    }
+    
+    .water-submenu li {
+        margin-bottom: 0.25rem;
+    }
+    
+    .water-submenu a {
+        padding: 0.75rem 1rem;
+        border-radius: 4px;
+    }
+    
+    .water-submenu a:hover {
+        background-color: rgba(0, 0, 0, 0.05);
     }
 }
 
@@ -1691,7 +2332,8 @@ div.news-content ol,
     }
 }
 
-/* Google Ads Bottom Banner */
+/* Google Ads Bottom Banner (Admin Only) */
+/* Fixed at bottom, shows 1 ad on mobile, 3 on desktop */
 .google-ads-banner {
     position: fixed;
     bottom: 0;
@@ -1705,43 +2347,298 @@ div.news-content ol,
     display: flex;
     justify-content: center;
     align-items: center;
-    padding: 8px;
-    min-height: 90px;
+    padding: 4px 0; /* Match top banner: 4px top + 4px bottom = 8px total */
+    gap: 0; /* No gap on mobile to match top banner */
+    min-height: 68px; /* Match top banner: 60px image + 8px padding */
+    max-height: 68px;
+    height: 68px;
 }
 
-.google-ads-banner .adsbygoogle {
-    display: block;
-    width: 100%;
-    max-width: 728px;
-    height: 90px;
-    margin: 0 auto;
+.google-ad-item {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden; /* Hide any overflow from ads */
+    position: relative;
 }
 
-/* Mobile: Narrow banner (320x50) */
-@media (max-width: 768px) {
+.google-ad-item .adsbygoogle {
+    display: inline-block;
+    max-height: 60px !important; /* Force max height */
+    height: 60px !important; /* Force height */
+    overflow: hidden !important; /* Hide overflow */
+}
+
+/* Constrain ad iframes to 60px height */
+.google-ad-item iframe {
+    max-height: 60px !important;
+    height: 60px !important;
+    overflow: hidden !important;
+}
+
+/* Constrain ad container divs */
+.google-ad-item > div {
+    max-height: 60px !important;
+    height: 60px !important;
+    overflow: hidden !important;
+}
+
+/* Mobile: Show only 1 ad */
+.mobile-ad {
+    display: flex;
+}
+
+.desktop-ad-1,
+.desktop-ad-2,
+.desktop-ad-3 {
+    display: none;
+}
+
+/* Desktop: Show 3 ads side by side */
+@media (min-width: 769px) {
     .google-ads-banner {
-        padding: 4px 0;
-        min-height: 58px;
+        padding: 8px; /* Desktop: more padding */
+        gap: 15px;
+        min-height: 76px; /* Desktop: 60px ad + 16px padding */
+        max-height: 76px !important; /* Constrain to prevent large ads from expanding */
+        height: 76px !important; /* Fixed height */
+        display: flex !important; /* Ensure banner is visible on desktop */
+        overflow: hidden; /* Hide any overflow */
     }
     
-    .google-ads-banner .adsbygoogle {
-        max-width: 320px;
-        height: 50px;
+    .mobile-ad {
+        display: none;
+    }
+    
+    .desktop-ad-1,
+    .desktop-ad-2,
+    .desktop-ad-3 {
+        display: flex;
+        max-height: 60px !important; /* Constrain each ad item */
+        height: 60px !important;
+        overflow: hidden !important;
+    }
+    
+    /* Force all desktop ad content to 60px */
+    .desktop-ad-1 .adsbygoogle,
+    .desktop-ad-2 .adsbygoogle,
+    .desktop-ad-3 .adsbygoogle {
+        max-height: 60px !important;
+        height: 60px !important;
+        overflow: hidden !important;
+    }
+    
+    .desktop-ad-1 iframe,
+    .desktop-ad-2 iframe,
+    .desktop-ad-3 iframe {
+        max-height: 60px !important;
+        height: 60px !important;
+        overflow: hidden !important;
+    }
+    
+    .desktop-ad-1 > div,
+    .desktop-ad-2 > div,
+    .desktop-ad-3 > div {
+        max-height: 60px !important;
+        height: 60px !important;
+        overflow: hidden !important;
+    }
+    
+    /* Constrain nested divs within adsbygoogle */
+    .desktop-ad-1 .adsbygoogle > div,
+    .desktop-ad-2 .adsbygoogle > div,
+    .desktop-ad-3 .adsbygoogle > div {
+        max-height: 60px !important;
+        height: 60px !important;
+        overflow: hidden !important;
+    }
+    
+    /* Constrain any further nested divs */
+    .desktop-ad-1 .adsbygoogle > div > div,
+    .desktop-ad-2 .adsbygoogle > div > div,
+    .desktop-ad-3 .adsbygoogle > div > div {
+        max-height: 60px !important;
+        height: 60px !important;
+        overflow: hidden !important;
+    }
+    
+    /* Constrain the host div that contains the iframe */
+    .desktop-ad-1 [id*="aswift"],
+    .desktop-ad-2 [id*="aswift"],
+    .desktop-ad-3 [id*="aswift"] {
+        max-height: 60px !important;
+        height: 60px !important;
+        overflow: hidden !important;
+    }
+}
+
+/* Hide ad banner when it has no content */
+.google-ads-banner.hidden,
+.google-ads-banner[style*="display: none"],
+.google-ads-banner[style*="display:none"] {
+    display: none !important;
+    min-height: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    position: absolute !important;
+    visibility: hidden !important;
+}
+
+/* Mobile: Match top banner exactly */
+@media (max-width: 768px) {
+    .google-ads-banner {
+        padding: 4px 0 !important; /* Match top banner exactly: 4px top + 4px bottom = 8px total */
+        min-height: 68px !important; /* Match top banner: 60px + 8px padding */
+        max-height: 68px !important;
+        height: 68px !important;
+        gap: 0 !important; /* Remove gap to match top banner */
+        overflow: hidden; /* Hide any overflow */
+    }
+    
+    .google-ad-item {
+        height: 60px !important; /* Ad itself is 60px, matching top banner image */
+        max-height: 60px !important;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important; /* Hide overflow */
+    }
+    
+    .google-ad-item .adsbygoogle {
+        height: 60px !important;
+        max-height: 60px !important;
+        width: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        display: inline-block !important;
+        overflow: hidden !important;
+    }
+    
+    /* Force mobile ad iframes and containers to 60px - match desktop constraints */
+    .google-ad-item iframe {
+        max-height: 60px !important;
+        height: 60px !important;
+        overflow: hidden !important;
+    }
+    
+    /* Constrain all nested divs in mobile ads */
+    .google-ad-item > div {
+        max-height: 60px !important;
+        height: 60px !important;
+        overflow: hidden !important;
+    }
+    
+    /* Constrain nested divs within adsbygoogle (like desktop) */
+    .google-ad-item .adsbygoogle > div {
+        max-height: 60px !important;
+        height: 60px !important;
+        overflow: hidden !important;
+    }
+    
+    /* Constrain any further nested divs */
+    .google-ad-item .adsbygoogle > div > div {
+        max-height: 60px !important;
+        height: 60px !important;
+        overflow: hidden !important;
+    }
+    
+    /* Constrain the host div that contains the iframe */
+    .google-ad-item [id*="aswift"] {
+        max-height: 60px !important;
+        height: 60px !important;
+        overflow: hidden !important;
     }
     
     .main-footer {
-        margin-bottom: 58px; /* Space for fixed ad banner on mobile */
+        margin-bottom: 0; /* Remove bottom margin - body padding handles spacing */
+    }
+    
+    /* Ensure body padding is only set once by JavaScript, not doubled */
+    body:has(.google-ads-banner) {
+        padding-bottom: 0 !important; /* Remove CSS padding, let JavaScript handle it */
+    }
+    
+    body.ad-banner-visible {
+        padding-bottom: 0 !important; /* Remove CSS padding, let JavaScript handle it */
     }
 }
 
 /* Add padding to body to prevent content from being hidden behind ad */
+/* No padding by default - JavaScript will add it only if ad loads */
 body {
-    padding-bottom: 90px;
+    padding-bottom: 0;
+}
+
+/* Body padding for Google Ads banner - removed, handled by JavaScript only */
+/* CSS padding removed to prevent doubling with JavaScript */
+
+/* Legacy class support - removed, handled by JavaScript only */
+/* CSS padding removed to prevent doubling with JavaScript */
+
+/* iOS specific fixes */
+@supports (-webkit-touch-callout: none) {
+    .google-ads-banner {
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+    
+    /* Hide empty ad banner on iOS to prevent white space */
+    .google-ads-banner:empty,
+    .google-ads-banner .adsbygoogle:empty {
+        display: none !important;
+        min-height: 0 !important;
+        height: 0 !important;
+        padding: 0 !important;
+    }
+    
+    body {
+        padding-bottom: calc(90px + env(safe-area-inset-bottom));
+    }
+    
+    @media (max-width: 768px) {
+        body {
+            padding-bottom: calc(58px + env(safe-area-inset-bottom));
+        }
+        
+        /* If ad banner is hidden, reduce body padding */
+        body:has(.google-ads-banner:empty) {
+            padding-bottom: env(safe-area-inset-bottom) !important;
+        }
+    }
+    
+    .main-footer {
+        padding-bottom: calc(2rem + env(safe-area-inset-bottom));
+    }
+}
+
+/* Hide empty ad banner to prevent white space */
+.google-ads-banner:empty {
+    display: none !important;
+    min-height: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+}
+
+/* Hide ad banner when it has no visible content (handled by JavaScript) */
+.google-ads-banner.hidden {
+    display: none !important;
+    min-height: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+}
+
+/* Adjust body padding when ad banner is hidden (handled by JavaScript) */
+body.no-ad-banner {
+    padding-bottom: 0 !important;
 }
 
 @media (max-width: 768px) {
-    body {
-        padding-bottom: 58px;
+    body.no-ad-banner {
+        padding-bottom: env(safe-area-inset-bottom) !important;
     }
 }
 
@@ -1750,3 +2647,217 @@ body {
     padding-bottom: 1rem;
 }
 
+/* Top Banner Area (Admin Only) */
+.top-banner-container {
+    background-color: var(--white);
+    border-bottom: 1px solid var(--border-color);
+    padding: 4px 0; /* 4px top + 4px bottom = 8px total */
+    width: 100%;
+    min-height: 68px; /* Match content: 60px image + 8px padding */
+    max-height: 68px;
+    height: 68px;
+    display: block; /* Changed from flex to block to allow container centering */
+    position: fixed; /* Fixed on all screen sizes */
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 998; /* Below header (1000) but above content */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin: 0; /* Remove any default margins */
+    margin-top: 0 !important; /* Ensure no gap at top */
+    margin-bottom: 0 !important; /* Ensure no gap at bottom */
+}
+
+/* Remove any vertical spacing from container inside top banner */
+.top-banner-container > .container {
+    margin: 0 auto !important; /* Center the container */
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center; /* Center the content */
+    width: 100%;
+    max-width: 1200px; /* Match base container max-width */
+}
+
+/* Mobile: Fix banner at top */
+@media (max-width: 768px) {
+    .top-banner-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 998; /* Below header (1000) but above content */
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        padding: 4px 0 !important; /* Match bottom banner exactly */
+        min-height: 68px !important;
+        max-height: 68px !important;
+        height: 68px !important;
+    }
+    
+    .top-banners {
+        gap: 0 !important; /* Remove gap to match bottom banner */
+        min-height: 60px !important;
+        max-height: 60px !important;
+        height: 60px !important;
+    }
+    
+    /* Position header directly below fixed banner with no gap */
+    body:has(.top-banner-container) .main-header {
+        position: sticky;
+        top: 68px !important; /* Height of top banner (60px + 8px padding) */
+        z-index: 1000;
+        margin-top: 0 !important; /* No gap between top banner and header */
+        padding-top: 0 !important;
+        border-top: none !important; /* No border at top */
+    }
+    
+    /* Ensure header-top has no top margin/padding when banner is present */
+    body:has(.top-banner-container) .header-top {
+        margin-top: 0 !important;
+        padding-top: 0.75rem !important; /* Match mobile padding */
+    }
+    
+    /* Ensure top banner has no bottom margin */
+    .top-banner-container {
+        margin-bottom: 0 !important;
+        border-bottom: 1px solid var(--border-color); /* Keep border for separation */
+    }
+    
+    /* Remove any spacing from container inside top banner on mobile */
+    .top-banner-container > .container {
+        margin: 0 auto !important; /* Center the container */
+        padding: 0 20px !important; /* Horizontal padding only */
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center; /* Center the content */
+        width: 100%;
+        max-width: 1200px; /* Match base container max-width */
+    }
+    
+    /* Add padding to body to prevent content from being hidden behind fixed banner and header */
+    body:has(.top-banner-container) {
+        padding-top: 140px; /* Banner (68px) + Header (approximately 72px) */
+    }
+}
+
+/* Mobile: Fix banner at top - duplicate section removed, handled above */
+
+.top-banners {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0; /* No gap on mobile to match bottom banner */
+    align-items: center;
+    justify-items: center;
+    position: relative;
+    min-height: 60px; /* Match image height */
+    max-height: 60px;
+    height: 60px;
+}
+
+.top-banner-item {
+    width: 100%;
+    max-width: 400px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    opacity: 1;
+    transition: opacity 0.3s ease;
+}
+
+.top-banner-image {
+    width: 100%;
+    height: auto;
+    max-height: 60px;
+    object-fit: contain;
+    display: block;
+}
+
+/* Desktop: Show 3 banners side by side */
+@media (min-width: 769px) {
+    .top-banners {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 15px;
+        min-height: 70px; /* Prevent layout shift during rotation */
+    }
+    
+    .top-banner-item {
+        max-width: 380px;
+    }
+    
+    .top-banner-image {
+        max-height: 70px;
+    }
+}
+
+/* Advert Modal Styles */
+.advert-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.advert-modal-content {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    max-width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+    position: relative;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.advert-modal-content h2 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: var(--primary-color);
+}
+
+.advert-modal-content h3 {
+    margin: 0 0 10px 0;
+    color: var(--primary-color);
+}
+
+.advert-modal-content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.advert-modal-content .btn {
+    display: inline-block;
+    padding: 10px 20px;
+    background: var(--primary-color);
+    color: white;
+    text-decoration: none;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+.advert-modal-content .btn:hover {
+    background: var(--secondary-color);
+}
+
+/* Mobile responsive for modal */
+@media (max-width: 768px) {
+    .advert-modal-content {
+        padding: 15px;
+        max-width: 95%;
+    }
+}

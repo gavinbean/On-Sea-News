@@ -12,10 +12,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $username = getUserByEmail($email);
         if ($username) {
-            $success = "Your username is: $username";
+            // Send username via email
+            require_once __DIR__ . '/includes/email.php';
+            $emailSent = sendUsernameReminderEmail($email, $username);
+            
+            if ($emailSent) {
+                $success = 'Your username has been sent to your email address.';
+            } else {
+                error_log("Failed to send username reminder email to: $email");
+                $error = 'Failed to send email. Please try again later or contact support.';
+            }
         } else {
-            // Don't reveal if email exists
-            $success = "If the email exists, your username has been sent.";
+            // Don't reveal if email exists for security
+            $success = 'If the email exists, your username has been sent.';
         }
     }
 }

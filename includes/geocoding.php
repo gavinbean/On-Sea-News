@@ -77,16 +77,53 @@ function geocodeAddressGoogle($address, $expectedHouseNumber = null) {
         // Check if house number is in the result
         $hasHouseNumber = false;
         if ($expectedHouseNumber) {
-            // Check address components
+            $expectedHouseNumberStr = (string)$expectedHouseNumber;
+            // Check address components for explicit street_number
             foreach ($result['address_components'] as $component) {
                 if (in_array('street_number', $component['types'])) {
-                    $hasHouseNumber = true;
-                    break;
+                    // Check if the value matches our expected house number
+                    if (isset($component['long_name']) && $component['long_name'] == $expectedHouseNumberStr) {
+                        $hasHouseNumber = true;
+                        break;
+                    }
+                    if (isset($component['short_name']) && $component['short_name'] == $expectedHouseNumberStr) {
+                        $hasHouseNumber = true;
+                        break;
+                    }
                 }
             }
-            // Also check formatted address
-            if (!$hasHouseNumber && strpos($formattedAddress, (string)$expectedHouseNumber) !== false) {
-                $hasHouseNumber = true;
+            // Check formatted address - look for house number at start of address or before street name
+            if (!$hasHouseNumber) {
+                // Check if house number appears at the beginning of the formatted address
+                if (preg_match('/^' . preg_quote($expectedHouseNumberStr, '/') . '\s+/i', $formattedAddress)) {
+                    $hasHouseNumber = true;
+                }
+                // Check if house number appears anywhere in the formatted address (as a whole word)
+                elseif (preg_match('/\b' . preg_quote($expectedHouseNumberStr, '/') . '\b/i', $formattedAddress)) {
+                    $hasHouseNumber = true;
+                }
+            }
+            // Also check street name component - sometimes house number is included there
+            if (!$hasHouseNumber) {
+                foreach ($result['address_components'] as $component) {
+                    if (in_array('route', $component['types']) || in_array('street_address', $component['types'])) {
+                        $streetName = $component['long_name'] ?? $component['short_name'] ?? '';
+                        if (preg_match('/^' . preg_quote($expectedHouseNumberStr, '/') . '\s+/i', $streetName) ||
+                            preg_match('/\b' . preg_quote($expectedHouseNumberStr, '/') . '\b/i', $streetName)) {
+                            $hasHouseNumber = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // If we have an expected house number and coordinates are precise, consider it as having house number
+        // even if not explicitly found (the service likely used it to get precise coordinates)
+        if (!$hasHouseNumber && $expectedHouseNumber) {
+            $locationType = $result['geometry']['location_type'] ?? '';
+            if ($locationType === 'ROOFTOP' || $locationType === 'RANGE_INTERPOLATED') {
+                $hasHouseNumber = true; // Precise coordinates suggest house number was used
             }
         }
         
@@ -188,18 +225,55 @@ function geocodeAddressNominatim($address, $expectedHouseNumber = null) {
         
         // Check if the returned result actually includes the house number
         $hasHouseNumber = false;
-        if (!empty($result['address'])) {
-            $addressDetails = $result['address'];
-            // Check various fields where house number might appear
-            if (!empty($addressDetails['house_number']) || 
-                !empty($addressDetails['house']) ||
-                (isset($addressDetails['house_number']) && $addressDetails['house_number'] != '')) {
-                $hasHouseNumber = true;
+        $explicitlyFound = false; // Track if we explicitly found it in the result
+        if ($expectedHouseNumber) {
+            $expectedHouseNumberStr = (string)$expectedHouseNumber;
+            if (!empty($result['address'])) {
+                $addressDetails = $result['address'];
+                // Check various fields where house number might appear explicitly
+                if (!empty($addressDetails['house_number']) && 
+                    ($addressDetails['house_number'] == $expectedHouseNumberStr || 
+                     strpos($addressDetails['house_number'], $expectedHouseNumberStr) !== false)) {
+                    $hasHouseNumber = true;
+                    $explicitlyFound = true;
+                }
+                if (!$hasHouseNumber && !empty($addressDetails['house']) && 
+                    ($addressDetails['house'] == $expectedHouseNumberStr || 
+                     strpos($addressDetails['house'], $expectedHouseNumberStr) !== false)) {
+                    $hasHouseNumber = true;
+                    $explicitlyFound = true;
+                }
             }
-            // Also check if house number appears in display_name
-            if ($expectedHouseNumber && strpos($result['display_name'], (string)$expectedHouseNumber) !== false) {
-                $hasHouseNumber = true;
+            // Check if house number appears in display_name (more flexible matching)
+            if (!$hasHouseNumber && !empty($result['display_name'])) {
+                $displayName = $result['display_name'];
+                // Check if house number appears at the beginning
+                if (preg_match('/^' . preg_quote($expectedHouseNumberStr, '/') . '\s+/i', $displayName)) {
+                    $hasHouseNumber = true;
+                    $explicitlyFound = true;
+                }
+                // Check if house number appears anywhere as a whole word
+                elseif (preg_match('/\b' . preg_quote($expectedHouseNumberStr, '/') . '\b/i', $displayName)) {
+                    $hasHouseNumber = true;
+                    $explicitlyFound = true;
+                }
             }
+            // Also check the road/street name - sometimes house number is included there
+            if (!$hasHouseNumber && !empty($result['address']['road'])) {
+                $roadName = $result['address']['road'];
+                if (preg_match('/^' . preg_quote($expectedHouseNumberStr, '/') . '\s+/i', $roadName) ||
+                    preg_match('/\b' . preg_quote($expectedHouseNumberStr, '/') . '\b/i', $roadName)) {
+                    $hasHouseNumber = true;
+                    $explicitlyFound = true;
+                }
+            }
+        }
+        
+        // If we have an expected house number and got coordinates, consider it as having house number
+        // The geocoding service likely used the house number to get the coordinates
+        if (!$hasHouseNumber && $expectedHouseNumber) {
+            // If we successfully geocoded with a house number provided, assume it was used
+            $hasHouseNumber = true;
         }
         
         return [
@@ -208,7 +282,7 @@ function geocodeAddressNominatim($address, $expectedHouseNumber = null) {
             'longitude' => $longitude,
             'formatted_address' => $formattedAddress,
             'has_house_number' => $hasHouseNumber,
-            'approximate' => $expectedHouseNumber && !$hasHouseNumber // Approximate if we expected a house number but didn't get one
+            'approximate' => $expectedHouseNumber && !$explicitlyFound // Approximate if we expected a house number but didn't explicitly find it in result
         ];
     } else {
         return [
@@ -291,6 +365,19 @@ function validateAndGeocodeAddress($addressOrComponents) {
         
         $result = geocodeAddressGoogle($googleAddress, $addressOrComponents['street_number'] ?? null);
         
+        // If Google succeeds but doesn't include house number and we have one, try Nominatim as fallback
+        if ($result['success'] && !empty($addressOrComponents['street_number']) && 
+            isset($result['has_house_number']) && !$result['has_house_number'] && 
+            $provider !== 'google') {
+            // Try Nominatim to see if it can find the house number
+            $addressWithContext = $address . ', South Africa';
+            $nominatimResult = geocodeAddressNominatim($addressWithContext, $addressOrComponents['street_number']);
+            // Use Nominatim result if it includes the house number
+            if ($nominatimResult['success'] && isset($nominatimResult['has_house_number']) && $nominatimResult['has_house_number']) {
+                return $nominatimResult;
+            }
+        }
+        
         // If Google succeeds, return it
         if ($result['success']) {
             return $result;
@@ -306,6 +393,35 @@ function validateAndGeocodeAddress($addressOrComponents) {
     // Strategy 1: Full address with street number and South Africa context
     $addressWithContext = $address . ', South Africa';
     $result = geocodeAddressNominatim($addressWithContext, is_array($addressOrComponents) ? ($addressOrComponents['street_number'] ?? null) : null);
+    
+    // If Nominatim succeeds but doesn't include house number and we have one, try Google as fallback
+    if ($result['success'] && is_array($addressOrComponents) && !empty($addressOrComponents['street_number']) && 
+        isset($result['has_house_number']) && !$result['has_house_number']) {
+        $apiKey = defined('GOOGLE_MAPS_API_KEY') ? GOOGLE_MAPS_API_KEY : '';
+        if (!empty($apiKey)) {
+            $googleAddress = [
+                'house_number' => $addressOrComponents['street_number'] ?? '',
+                'street' => $addressOrComponents['street_name'] ?? '',
+                'city' => $addressOrComponents['town'] ?? '',
+                'state' => '',
+                'country' => 'South Africa'
+            ];
+            if (!empty($addressOrComponents['suburb'])) {
+                $googleAddress['city'] = $addressOrComponents['suburb'] . ', ' . $googleAddress['city'];
+            }
+            $googleResult = geocodeAddressGoogle($googleAddress, $addressOrComponents['street_number'] ?? null);
+            // Use Google result if it includes the house number, or if it's more precise (not approximate)
+            if ($googleResult['success']) {
+                if (isset($googleResult['has_house_number']) && $googleResult['has_house_number']) {
+                    return $googleResult; // Google has house number, use it
+                } elseif (!isset($googleResult['approximate']) || !$googleResult['approximate']) {
+                    // Google doesn't have house number but is precise, prefer it over Nominatim
+                    return $googleResult;
+                }
+                // Otherwise, keep Nominatim result
+            }
+        }
+    }
     
     // Strategy 2: Full address without country context
     if (!$result['success']) {

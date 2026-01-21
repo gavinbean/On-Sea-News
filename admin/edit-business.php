@@ -7,11 +7,12 @@ $businessId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $message = '';
 $error = '';
 
-// Get business (admin can edit any business)
+// Get business (admin can edit any business) with owner information
 $stmt = $db->prepare("
-    SELECT b.*, c.category_name
+    SELECT b.*, c.category_name, u.name as owner_name, u.surname as owner_surname, u.username as owner_username
     FROM " . TABLE_PREFIX . "businesses b
     JOIN " . TABLE_PREFIX . "business_categories c ON b.category_id = c.category_id
+    LEFT JOIN " . TABLE_PREFIX . "users u ON b.user_id = u.user_id
     WHERE b.business_id = ?
 ");
 $stmt->execute([$businessId]);
@@ -44,9 +45,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $email = trim($_POST['email'] ?? '');
     $website = trim($_POST['website'] ?? '');
     $description = trim($_POST['description'] ?? '');
-    $isApproved = isset($_POST['is_approved']) ? 1 : 0;
-    
-    // Address components
+        $isApproved = isset($_POST['is_approved']) ? 1 : 0;
+        
+        // Owner selection (only if business doesn't have an owner)
+        $selectedUserId = null;
+        if (empty($business['user_id']) && !empty($_POST['user_id'])) {
+            $selectedUserId = (int)$_POST['user_id'];
+            // Verify user exists
+            $userCheck = $db->prepare("SELECT user_id FROM " . TABLE_PREFIX . "users WHERE user_id = ?");
+            $userCheck->execute([$selectedUserId]);
+            if (!$userCheck->fetch()) {
+                $selectedUserId = null;
+            }
+        }
+        
+        // Address components
     $buildingName = trim($_POST['building_name'] ?? '');
     $streetNumber = trim($_POST['street_number'] ?? '');
     $streetName = trim($_POST['street_name'] ?? '');
@@ -85,27 +98,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         if (!empty($town)) $addressParts[] = $town;
         $address = implode(', ', $addressParts);
         
-        $stmt = $db->prepare("
-            UPDATE " . TABLE_PREFIX . "businesses 
-            SET business_name = ?, category_id = ?, contact_name = ?, telephone = ?, 
-                email = ?, website = ?, description = ?, is_approved = ?,
-                building_name = ?, street_number = ?, street_name = ?, suburb = ?, town = ?,
-                address = ?, latitude = ?, longitude = ?
-            WHERE business_id = ?
-        ");
-        $stmt->execute([
-            $businessName, $categoryId, $contactName, $telephone, $email, $website, 
-            $description, $isApproved, $buildingName, $streetNumber, $streetName, $suburb, $town,
-            $address, $latitude, $longitude, $businessId
-        ]);
+        // Build update query - include user_id if setting an owner
+        if ($selectedUserId !== null) {
+            $stmt = $db->prepare("
+                UPDATE " . TABLE_PREFIX . "businesses 
+                SET business_name = ?, category_id = ?, contact_name = ?, telephone = ?, 
+                    email = ?, website = ?, description = ?, is_approved = ?,
+                    building_name = ?, street_number = ?, street_name = ?, suburb = ?, town = ?,
+                    address = ?, latitude = ?, longitude = ?, user_id = ?
+                WHERE business_id = ?
+            ");
+            $stmt->execute([
+                $businessName, $categoryId, $contactName, $telephone, $email, $website, 
+                $description, $isApproved, $buildingName, $streetNumber, $streetName, $suburb, $town,
+                $address, $latitude, $longitude, $selectedUserId, $businessId
+            ]);
+        } else {
+            $stmt = $db->prepare("
+                UPDATE " . TABLE_PREFIX . "businesses 
+                SET business_name = ?, category_id = ?, contact_name = ?, telephone = ?, 
+                    email = ?, website = ?, description = ?, is_approved = ?,
+                    building_name = ?, street_number = ?, street_name = ?, suburb = ?, town = ?,
+                    address = ?, latitude = ?, longitude = ?
+                WHERE business_id = ?
+            ");
+            $stmt->execute([
+                $businessName, $categoryId, $contactName, $telephone, $email, $website, 
+                $description, $isApproved, $buildingName, $streetNumber, $streetName, $suburb, $town,
+                $address, $latitude, $longitude, $businessId
+            ]);
+        }
         
         $message = 'Business updated successfully.';
         
-        // Reload business
+        // Reload business with owner information
         $stmt = $db->prepare("
-            SELECT b.*, c.category_name
+            SELECT b.*, c.category_name, u.name as owner_name, u.surname as owner_surname, u.username as owner_username
             FROM " . TABLE_PREFIX . "businesses b
             JOIN " . TABLE_PREFIX . "business_categories c ON b.category_id = c.category_id
+            LEFT JOIN " . TABLE_PREFIX . "users u ON b.user_id = u.user_id
             WHERE b.business_id = ?
         ");
         $stmt->execute([$businessId]);
@@ -129,6 +160,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 // Get all categories
 $stmt = $db->query("SELECT * FROM " . TABLE_PREFIX . "business_categories ORDER BY category_name");
 $categories = $stmt->fetchAll();
+
+// Get all users for owner selection (only if business doesn't have an owner)
+$users = [];
+if (empty($business['user_id'])) {
+    $stmt = $db->query("
+        SELECT user_id, username, name, surname, email 
+        FROM " . TABLE_PREFIX . "users 
+        WHERE is_active = 1 
+        ORDER BY name, surname, username
+    ");
+    $users = $stmt->fetchAll();
+}
 
 $pageTitle = 'Edit Business';
 include __DIR__ . '/../includes/header.php';
@@ -190,6 +233,43 @@ include __DIR__ . '/../includes/header.php';
                 <label for="description">Description:</label>
                 <textarea id="description" name="description" rows="5"><?= h($business['description'] ?: '') ?></textarea>
             </div>
+            
+            <h3>Owner</h3>
+            
+            <?php if (!empty($business['user_id']) && !empty($business['owner_name'])): ?>
+                <!-- Show owner as link if business has an owner -->
+                <div class="form-group">
+                    <label>Current Owner:</label>
+                    <div style="padding: 0.75rem; background-color: #f5f5f5; border-radius: 4px; border-left: 3px solid var(--primary-color);">
+                        <a href="<?= baseUrl('/admin/edit-user.php?id=' . $business['user_id']) ?>" 
+                           style="text-decoration: none; color: var(--primary-color); font-weight: 600; font-size: 1.1rem;">
+                            <?= h($business['owner_name'] . ' ' . ($business['owner_surname'] ?? '')) ?>
+                        </a>
+                        <?php if (!empty($business['owner_username'])): ?>
+                            <span style="color: #666; margin-left: 0.5rem;">(<?= h($business['owner_username']) ?>)</span>
+                        <?php endif; ?>
+                    </div>
+                    <small style="display: block; margin-top: 0.25rem; color: #666;">
+                        Click the name to edit the owner's profile
+                    </small>
+                </div>
+            <?php else: ?>
+                <!-- Show owner selection dropdown if business doesn't have an owner -->
+                <div class="form-group">
+                    <label for="user_id">Select Owner:</label>
+                    <select id="user_id" name="user_id" style="width: 100%;">
+                        <option value="">-- No Owner (Imported Business) --</option>
+                        <?php foreach ($users as $user): ?>
+                            <option value="<?= $user['user_id'] ?>">
+                                <?= h($user['name'] . ' ' . ($user['surname'] ?? '') . ' (' . $user['username'] . ') - ' . $user['email']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <small style="display: block; margin-top: 0.25rem; color: #666;">
+                        Select a user to assign as the owner of this business. Leave as "No Owner" for imported businesses.
+                    </small>
+                </div>
+            <?php endif; ?>
             
             <h3>Address</h3>
             

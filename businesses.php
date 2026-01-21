@@ -12,9 +12,19 @@ $params = [];
 // Only show approved businesses (user_id can be NULL for imported businesses)
 $where[] = "b.is_approved = 1";
 
+// For admins, only show businesses with valid pricing status
+// For regular users, show all approved businesses regardless of pricing status
+$isAdmin = hasRole('ADMIN');
+if ($isAdmin) {
+    $where[] = "b.pricing_status IS NOT NULL AND b.pricing_status != ''";
+}
+
 if (!empty($search)) {
-    $where[] = "(b.business_name LIKE ? OR b.contact_name LIKE ? OR b.description LIKE ?)";
+    $where[] = "(b.business_name LIKE ? OR b.contact_name LIKE ? OR b.description LIKE ? OR b.email LIKE ? OR b.telephone LIKE ? OR c.category_name LIKE ?)";
     $searchTerm = '%' . $search . '%';
+    $params[] = $searchTerm;
+    $params[] = $searchTerm;
+    $params[] = $searchTerm;
     $params[] = $searchTerm;
     $params[] = $searchTerm;
     $params[] = $searchTerm;
@@ -31,6 +41,7 @@ $whereClause = implode(' AND ', $where);
 $countStmt = $db->prepare("
     SELECT COUNT(*) as total
     FROM " . TABLE_PREFIX . "businesses b
+    LEFT JOIN " . TABLE_PREFIX . "business_categories c ON b.category_id = c.category_id
     WHERE $whereClause
 ");
 $countStmt->execute($params);
@@ -85,7 +96,7 @@ include 'includes/header.php';
                 <div class="search-row">
                     <div class="search-field">
                         <label for="search">Search:</label>
-                        <input type="text" id="search" name="search" value="<?= h($search) ?>" placeholder="Search by company name, contact name, or service...">
+                        <input type="text" id="search" name="search" value="<?= h($search) ?>" placeholder="Search by business name, category, contact name, email, or phone...">
                     </div>
                     
                     <div class="search-field">

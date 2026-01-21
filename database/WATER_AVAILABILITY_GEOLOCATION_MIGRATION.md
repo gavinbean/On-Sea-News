@@ -85,3 +85,4 @@ If you need to rollback:
 3. Remove columns: `ALTER TABLE bk_water_availability DROP COLUMN latitude, DROP COLUMN longitude;`
 4. Revert code changes in the modified files
 
+

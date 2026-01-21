@@ -28,6 +28,19 @@ include 'includes/header.php';
         <article class="news-item">
             <div class="news-item-header">
                 <h1><?= h($news['title']) ?></h1>
+                <div class="news-meta" style="font-size: 0.9rem; color: #666; margin-top: 0.5rem; margin-bottom: 1rem;">
+                    <?php 
+                    $showDate = !isset($news['show_publish_date']) || $news['show_publish_date'];
+                    $showAuthor = !isset($news['show_author']) || $news['show_author'];
+                    ?>
+                    <?php if ($showDate && $news['published_at']): ?>
+                        <span>Published: <?= date('F j, Y', strtotime($news['published_at'])) ?></span>
+                    <?php endif; ?>
+                    <?php if ($showAuthor): ?>
+                        <?php if ($showDate && $news['published_at']): ?> | <?php endif; ?>
+                        <span>By <?= h($news['name'] . ' ' . $news['surname']) ?></span>
+                    <?php endif; ?>
+                </div>
             </div>
             <div class="news-item-content">
                 <?php if ($news['featured_image']): ?>

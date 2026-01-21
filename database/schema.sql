@@ -170,16 +170,28 @@ CREATE TABLE IF NOT EXISTS `bk_advert_transactions` (
 -- Water availability tracking
 CREATE TABLE IF NOT EXISTS `bk_water_availability` (
   `water_id` INT(11) NOT NULL AUTO_INCREMENT,
-  `user_id` INT(11) NOT NULL,
+  `user_id` INT(11) NULL,
   `report_date` DATE NOT NULL,
   `has_water` TINYINT(1) NOT NULL DEFAULT 1,
   `notes` TEXT NULL,
   `reported_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`water_id`),
   FOREIGN KEY (`user_id`) REFERENCES `bk_users`(`user_id`) ON DELETE RESTRICT,
-  UNIQUE KEY `unique_user_date` (`user_id`, `report_date`),
   INDEX `idx_date` (`report_date`),
   INDEX `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Frequently Asked Questions (FAQ)
+CREATE TABLE IF NOT EXISTS `bk_faq` (
+  `faq_id` INT(11) NOT NULL AUTO_INCREMENT,
+  `question` VARCHAR(255) NOT NULL,
+  `answer` TEXT NOT NULL,
+  `display_order` INT(11) NOT NULL DEFAULT 0,
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`faq_id`),
+  INDEX `idx_active_order` (`is_active`, `display_order`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Session table for CAPTCHA and sessions
@@ -197,6 +209,7 @@ INSERT INTO `bk_roles` (`role_name`, `role_description`) VALUES
 ('ADMIN', 'Administrator with full access'),
 ('PUBLISHER', 'Can publish news articles'),
 ('ADVERTISER', 'Can manage advertisements'),
-('DATA_CAPTURER', 'Can capture data and manage content')
+('DATA_CAPTURER', 'Can capture data and manage content'),
+('USER_ADMIN', 'User administrator - can manage users but cannot modify roles or delete users')
 ON DUPLICATE KEY UPDATE role_name=role_name;
 

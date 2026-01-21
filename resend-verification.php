@@ -36,9 +36,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             // Send verification email
             $fullName = $user['name'] . ' ' . $user['surname'];
-            sendVerificationEmail($user['user_id'], $email, $fullName, $verificationToken);
+            $emailSent = sendVerificationEmail($user['user_id'], $email, $fullName, $verificationToken);
             
-            $success = 'A new verification email has been sent. Please check your inbox.';
+            if ($emailSent) {
+                $success = 'A new verification email has been sent. Please check your inbox.';
+            } else {
+                error_log("Failed to send verification email to: $email for user_id: {$user['user_id']}");
+                $error = 'Failed to send verification email. Please try again later or contact support.';
+            }
         }
     }
 }

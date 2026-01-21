@@ -85,12 +85,32 @@ include 'includes/header.php';
                 </div>
             <?php endif; ?>
             
-            <div class="business-actions">
+            <?php if (isLoggedIn()): ?>
+            <div class="business-follow" style="margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 4px;">
+                <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+                    <input type="checkbox" id="follow-business-<?= $business['business_id'] ?>" style="margin-top: 3px; cursor: pointer;" onchange="toggleBusinessFollow(<?= $business['business_id'] ?>, this.checked)">
+                    <div>
+                        <strong>Follow</strong>
+                        <p style="margin: 5px 0 0 0; font-size: 0.9rem; color: #666;">By ticking Follow I agree to having emails sent to me when adverts are changed</p>
+                    </div>
+                </label>
+            </div>
+            <?php endif; ?>
+            
+            <div class="business-actions" style="margin-top: 20px;">
                 <a href="<?= baseUrl('/index.php') ?>" class="btn btn-secondary">Back to Home</a>
             </div>
         </div>
     </div>
 </div>
+
+<?php if (isLoggedIn()): ?>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    checkFollowStatus(<?= $business['business_id'] ?>);
+});
+</script>
+<?php endif; ?>
 
 <?php 
 $hideAdverts = false;

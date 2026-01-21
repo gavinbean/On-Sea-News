@@ -24,3 +24,4 @@ ADD INDEX `idx_location` (`latitude`, `longitude`);
 -- database/update_water_availability_coordinates.php
 -- to populate existing records with coordinates from user profiles
 
+

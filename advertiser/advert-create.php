@@ -60,7 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $destPath = $uploadDir . $newFileName;
             
             if (move_uploaded_file($fileTmpPath, $destPath)) {
-                $uploadedFile = 'uploads/adverts/' . $newFileName;
+                $uploadedFile = 'uploads/graphics/' . $newFileName;
             } else {
                 $error = 'File upload failed.';
             }

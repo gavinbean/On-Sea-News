@@ -9,3 +9,4 @@
 
 -- No ALTER TABLE needed as TINYINT(1) already supports these values
 
+

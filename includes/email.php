@@ -9,6 +9,7 @@ require_once __DIR__ . '/../config/database.php';
 /**
  * Send email (basic PHP mail function)
  * For production, consider using PHPMailer or similar library
+ * Automatically handles embedded images using multipart/related format to avoid RFC 5322 line length issues
  */
 function sendEmail($to, $subject, $message, $fromEmail = null, $fromName = null, $replyTo = null) {
     $fromEmail = $fromEmail ?: EMAIL_FROM_ADDRESS;
@@ -24,10 +25,77 @@ function sendEmail($to, $subject, $message, $fromEmail = null, $fromName = null,
     $fromEmail = str_replace(["\r", "\n"], '', $fromEmail);
     $subject = str_replace(["\r", "\n"], '', $subject);
     
-    $headers = "MIME-Version: 1.0\r\n";
-    $headers .= "Content-Type: text/html; charset=UTF-8\r\n";
-    // Use base64 encoding for the whole email body to avoid line-length issues while keeping data URIs intact
-    $headers .= "Content-Transfer-Encoding: base64\r\n";
+    // Extract domain from email for List-Unsubscribe and other headers
+    $emailDomain = substr(strrchr($fromEmail, "@"), 1);
+    
+    // Check if message contains data URIs (embedded images)
+    // If so, convert to multipart/related format to avoid RFC 5322 line length issues
+    if (preg_match_all('/src=["\'](data:image\/([^;]+);base64,([^"\']+))["\']/i', $message, $matches, PREG_SET_ORDER)) {
+        error_log("Found " . count($matches) . " embedded image(s) in email, converting to multipart/related format");
+        
+        $boundary = '----=_Part_' . uniqid();
+        $imageParts = [];
+        $imageIndex = 0;
+        
+        // Extract and replace each data URI with a Content-ID reference
+        foreach ($matches as $match) {
+            $fullDataUri = $match[1];
+            $imageType = $match[2]; // png, jpeg, etc.
+            $base64Data = $match[3];
+            
+            // Decode base64 image data
+            $imageData = base64_decode($base64Data);
+            if ($imageData === false) {
+                error_log("Failed to decode base64 image data, skipping");
+                continue;
+            }
+            
+            $contentId = 'image_' . $imageIndex . '_' . uniqid();
+            $imageIndex++;
+            
+            // Replace data URI with cid: reference in message
+            $message = str_replace($fullDataUri, 'cid:' . $contentId, $message);
+            
+            // Create image part
+            $imagePart = "\r\n--$boundary\r\n";
+            $imagePart .= "Content-Type: image/$imageType\r\n";
+            $imagePart .= "Content-Transfer-Encoding: base64\r\n";
+            $imagePart .= "Content-ID: <$contentId>\r\n";
+            $imagePart .= "Content-Disposition: inline; filename=\"map.$imageType\"\r\n";
+            $imagePart .= "\r\n";
+            $imagePart .= chunk_split(base64_encode($imageData), 76, "\r\n");
+            
+            $imageParts[] = $imagePart;
+        }
+        
+        // Build multipart/related message
+        $htmlPart = "\r\n--$boundary\r\n";
+        $htmlPart .= "Content-Type: text/html; charset=UTF-8\r\n";
+        $htmlPart .= "Content-Transfer-Encoding: quoted-printable\r\n";
+        $htmlPart .= "\r\n";
+        $htmlPart .= quoted_printable_encode($message);
+        
+        // Combine all parts
+        $multipartMessage = $htmlPart;
+        foreach ($imageParts as $imagePart) {
+            $multipartMessage .= $imagePart;
+        }
+        $multipartMessage .= "\r\n--$boundary--\r\n";
+        
+        $headers = "MIME-Version: 1.0\r\n";
+        $headers .= "Content-Type: multipart/related; boundary=\"$boundary\"\r\n";
+        $message = $multipartMessage;
+    } else {
+        // No embedded images, use standard format
+        $headers = "MIME-Version: 1.0\r\n";
+        $headers .= "Content-Type: text/html; charset=UTF-8\r\n";
+        $headers .= "Content-Transfer-Encoding: quoted-printable\r\n";
+        
+        // RFC 5322 requires email lines to be max 998 characters
+        $message = ltrim($message);
+        $message = quoted_printable_encode($message);
+    }
+    
     $headers .= "From: $fromName <$fromEmail>\r\n";
     $headers .= "Sender: $fromEmail\r\n";
     if ($replyTo) {
@@ -36,10 +104,26 @@ function sendEmail($to, $subject, $message, $fromEmail = null, $fromName = null,
     } else {
         $headers .= "Reply-To: $fromEmail\r\n";
     }
-    $headers .= "X-Mailer: PHP/" . phpversion() . "\r\n";
+    
+    // Add important headers to improve deliverability
+    $headers .= "X-Mailer: " . SITE_NAME . " (PHP/" . phpversion() . ")\r\n";
+    $headers .= "X-Priority: 3\r\n"; // Normal priority
+    $headers .= "X-MSMail-Priority: Normal\r\n";
+    $headers .= "Importance: Normal\r\n";
+    
+    // Add List-Unsubscribe header (helps with spam filters)
+    $siteUrl = defined('SITE_URL') ? SITE_URL : 'https://onseanews.co.za';
+    $headers .= "List-Unsubscribe: <$siteUrl/unsubscribe.php>, <mailto:unsubscribe@$emailDomain?subject=Unsubscribe>\r\n";
+    $headers .= "List-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n";
+    
+    // Add Message-ID for better tracking
+    $messageId = '<' . time() . '.' . uniqid() . '@' . $emailDomain . '>';
+    $headers .= "Message-ID: $messageId\r\n";
+    
+    // Add Date header (required by RFC 5322)
+    $headers .= "Date: " . date('r') . "\r\n";
     
     // Use mail() without @ suppression to allow error logging
-    // The verification email works, so this should work too
     error_log("Attempting to send email to: $to, Subject: " . substr($subject, 0, 50));
     
     // Check if message is too large (some servers have limits)
@@ -57,12 +141,6 @@ function sendEmail($to, $subject, $message, $fromEmail = null, $fromName = null,
     if (strpos($message, "\0") !== false) {
         error_log("WARNING: Email message contains null bytes, which may cause issues");
     }
-    
-    // RFC 5322 requires email lines to be max 998 characters
-    // Encode the entire message as base64 and wrap at 76 characters (RFC 2045)
-    // Remove leading whitespace/newlines to avoid blank preface lines
-    $message = ltrim($message);
-    $message = chunk_split(base64_encode($message), 76, "\r\n");
     
     // Use envelope sender to match domain and improve deliverability
     $additionalParams = '-f' . $fromEmail;
@@ -105,7 +183,7 @@ function sendVerificationEmail($userId, $email, $name, $token) {
             .container { max-width: 600px; margin: 0 auto; padding: 20px; }
             .header { background-color: #2c5f8d; color: white; padding: 20px; text-align: center; }
             .content { padding: 20px; background-color: #f5f5f5; }
-            .button { display: inline-block; padding: 12px 24px; background-color: #2c5f8d; color: white; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+            .button { display: inline-block; padding: 12px 24px; background-color: #2c5f8d; color: #ffffff !important; text-decoration: none; border-radius: 4px; margin: 20px 0; }
             .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
         </style>
     </head>
@@ -119,7 +197,7 @@ function sendVerificationEmail($userId, $email, $name, $token) {
                 <p>Thank you for registering with " . h(SITE_NAME) . "!</p>
                 <p>Please verify your email address by clicking the button below:</p>
                 <p style='text-align: center;'>
-                    <a href='$verificationUrl' class='button'>Verify Email Address</a>
+                    <a href='$verificationUrl' class='button' style='display: inline-block; padding: 12px 24px; background-color: #2c5f8d; color: #ffffff !important; text-decoration: none; border-radius: 4px; margin: 20px 0; font-weight: bold;'>Verify Email Address</a>
                 </p>
                 <p>Or copy and paste this link into your browser:</p>
                 <p style='word-break: break-all;'>$verificationUrl</p>
@@ -156,7 +234,7 @@ function sendPasswordResetEmail($email, $username, $token) {
             .container { max-width: 600px; margin: 0 auto; padding: 20px; }
             .header { background-color: #2c5f8d; color: white; padding: 20px; text-align: center; }
             .content { padding: 20px; background-color: #f5f5f5; }
-            .button { display: inline-block; padding: 12px 24px; background-color: #2c5f8d; color: white; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+            .button { display: inline-block; padding: 12px 24px; background-color: #2c5f8d; color: #ffffff !important; text-decoration: none; border-radius: 4px; margin: 20px 0; }
             .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
         </style>
     </head>
@@ -170,12 +248,62 @@ function sendPasswordResetEmail($email, $username, $token) {
                 <p>Hello $username,</p>
                 <p>We received a request to reset your password. Click the button below to reset it:</p>
                 <p style='text-align: center;'>
-                    <a href='$resetUrl' class='button'>Reset Password</a>
+                    <a href='$resetUrl' class='button' style='display: inline-block; padding: 12px 24px; background-color: #2c5f8d; color: #ffffff !important; text-decoration: none; border-radius: 4px; margin: 20px 0; font-weight: bold;'>Reset Password</a>
                 </p>
                 <p>Or copy and paste this link into your browser:</p>
                 <p style='word-break: break-all;'>$resetUrl</p>
                 <p><strong>This link will expire in $expiryHours hours.</strong></p>
                 <p>If you did not request a password reset, please ignore this email.</p>
+            </div>
+            <div class='footer'>
+                <p>&copy; " . date('Y') . " " . h(SITE_NAME) . ". All rights reserved.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    ";
+    
+    return sendEmail($email, $subject, $message);
+}
+
+/**
+ * Send username reminder email
+ */
+function sendUsernameReminderEmail($email, $username) {
+    $subject = 'Your Username - ' . SITE_NAME;
+    
+    $message = "
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset='UTF-8'>
+        <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background-color: #2c5f8d; color: white; padding: 20px; text-align: center; }
+            .content { padding: 20px; background-color: #f5f5f5; }
+            .username-box { background-color: white; padding: 15px; border-left: 4px solid #2c5f8d; margin: 20px 0; }
+            .username { font-size: 18px; font-weight: bold; color: #2c5f8d; }
+            .button { display: inline-block; padding: 12px 24px; background-color: #2c5f8d; color: #ffffff !important; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+            .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
+        </style>
+    </head>
+    <body>
+        <div class='container'>
+            <div class='header'>
+                <h1>" . h(SITE_NAME) . "</h1>
+            </div>
+            <div class='content'>
+                <h2>Username Reminder</h2>
+                <p>You requested a reminder of your username. Here it is:</p>
+                <div class='username-box'>
+                    <p style='margin: 0;'><strong>Your Username:</strong></p>
+                    <p class='username' style='margin: 10px 0 0 0;'>" . h($username) . "</p>
+                </div>
+                <p style='text-align: center;'>
+                    <a href='" . SITE_URL . baseUrl('/login.php') . "' class='button' style='display: inline-block; padding: 12px 24px; background-color: #2c5f8d; color: #ffffff !important; text-decoration: none; border-radius: 4px; margin: 20px 0; font-weight: bold;'>Login Now</a>
+                </p>
+                <p>If you did not request this reminder, please ignore this email. Your account remains secure.</p>
             </div>
             <div class='footer'>
                 <p>&copy; " . date('Y') . " " . h(SITE_NAME) . ". All rights reserved.</p>
@@ -287,7 +415,7 @@ function notifyAdminsPendingBusinesses() {
             .container { max-width: 800px; margin: 0 auto; padding: 20px; }
             .header { background-color: #2c5f8d; color: white; padding: 20px; text-align: center; }
             .content { padding: 20px; background-color: #f5f5f5; }
-            .button { display: inline-block; padding: 12px 24px; background-color: #2c5f8d; color: white; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+            .button { display: inline-block; padding: 12px 24px; background-color: #2c5f8d; color: #ffffff !important; text-decoration: none; border-radius: 4px; margin: 20px 0; }
             .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
             .count-badge { background-color: #ffc107; color: #000; padding: 5px 10px; border-radius: 4px; font-weight: bold; }
         </style>
@@ -301,7 +429,7 @@ function notifyAdminsPendingBusinesses() {
                 <p>Hello,</p>
                 <p>There <span class='count-badge'>" . count($pendingBusinesses) . "</span> business" . (count($pendingBusinesses) > 1 ? 'es' : '') . " pending approval on " . h(SITE_NAME) . ".</p>
                 <p style='text-align: center;'>
-                    <a href='$approvalUrl' class='button'>Review Pending Businesses</a>
+                    <a href='$approvalUrl' class='button' style='display: inline-block; padding: 12px 24px; background-color: #2c5f8d; color: #ffffff !important; text-decoration: none; border-radius: 4px; margin: 20px 0; font-weight: bold;'>Review Pending Businesses</a>
                 </p>
                 <h2>Pending Businesses:</h2>
                 $businessListHtml
@@ -361,7 +489,7 @@ function sendBusinessApprovalEmail($business) {
             .container { max-width: 600px; margin: 0 auto; padding: 20px; }
             .header { background-color: #4caf50; color: white; padding: 20px; text-align: center; }
             .content { padding: 20px; background-color: #f5f5f5; }
-            .button { display: inline-block; padding: 12px 24px; background-color: #4caf50; color: white; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+            .button { display: inline-block; padding: 12px 24px; background-color: #4caf50; color: #ffffff !important; text-decoration: none; border-radius: 4px; margin: 20px 0; }
             .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
             .business-info { background-color: white; padding: 15px; border-left: 4px solid #4caf50; margin: 20px 0; }
         </style>
@@ -379,7 +507,7 @@ function sendBusinessApprovalEmail($business) {
                     <p>Your business is now visible to all visitors on the website.</p>
                 </div>
                 <p style='text-align: center;'>
-                    <a href='$businessUrl' class='button'>View Business Directory</a>
+                    <a href='$businessUrl' class='button' style='display: inline-block; padding: 12px 24px; background-color: #4caf50; color: #ffffff !important; text-decoration: none; border-radius: 4px; margin: 20px 0; font-weight: bold;'>View Business Directory</a>
                 </p>
                 <p>Thank you for your submission!</p>
             </div>
@@ -420,7 +548,7 @@ function sendBusinessRejectionEmail($business, $rejectionReason) {
             .container { max-width: 600px; margin: 0 auto; padding: 20px; }
             .header { background-color: #d32f2f; color: white; padding: 20px; text-align: center; }
             .content { padding: 20px; background-color: #f5f5f5; }
-            .button { display: inline-block; padding: 12px 24px; background-color: #2c5f8d; color: white; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+            .button { display: inline-block; padding: 12px 24px; background-color: #2c5f8d; color: #ffffff !important; text-decoration: none; border-radius: 4px; margin: 20px 0; }
             .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
             .rejection-info { background-color: white; padding: 15px; border-left: 4px solid #d32f2f; margin: 20px 0; }
             .reason-box { background-color: #ffebee; padding: 15px; border-radius: 4px; margin: 15px 0; }
@@ -442,6 +570,218 @@ function sendBusinessRejectionEmail($business, $rejectionReason) {
                     <p>" . nl2br(h($rejectionReason)) . "</p>
                 </div>
                 <p>If you have any questions or would like to resubmit your business with corrections, please feel free to contact us.</p>
+                <p>Thank you for your interest in " . h(SITE_NAME) . ".</p>
+            </div>
+            <div class='footer'>
+                <p>&copy; " . date('Y') . " " . h(SITE_NAME) . ". All rights reserved.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    ";
+    
+    return sendEmail($ownerEmail, $subject, $message);
+}
+
+/**
+ * Send contact form reply email
+ */
+function sendContactReplyEmail($queryId, $toEmail, $toName, $originalSubject, $originalMessage, $replyMessage) {
+    $subject = 'Re: ' . $originalSubject;
+    
+    $message = "
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset='UTF-8'>
+        <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background-color: #2c5f8d; color: white; padding: 20px; text-align: center; }
+            .content { padding: 20px; background-color: #f5f5f5; }
+            .reply-box { background-color: white; padding: 15px; border-left: 4px solid #2c5f8d; margin: 20px 0; }
+            .original-box { background-color: #f9f9f9; padding: 15px; border-left: 4px solid #999; margin: 20px 0; border-top: 1px solid #ddd; }
+            .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
+        </style>
+    </head>
+    <body>
+        <div class='container'>
+            <div class='header'>
+                <h1>Reply from " . h(SITE_NAME) . "</h1>
+            </div>
+            <div class='content'>
+                <p>Hello " . h($toName) . ",</p>
+                <p>Thank you for contacting us. Please see our reply below:</p>
+                
+                <div class='reply-box'>
+                    <h3 style='margin-top: 0;'>Our Reply:</h3>
+                    <p>" . nl2br(h($replyMessage)) . "</p>
+                </div>
+                
+                <div class='original-box'>
+                    <h4 style='margin-top: 0; color: #666;'>Your Original Message:</h4>
+                    <p style='color: #666;'><strong>Subject:</strong> " . h($originalSubject) . "</p>
+                    <p style='color: #666;'>" . nl2br(h($originalMessage)) . "</p>
+                </div>
+                
+                <p>If you have any further questions, please don't hesitate to contact us again.</p>
+            </div>
+            <div class='footer'>
+                <p>&copy; " . date('Y') . " " . h(SITE_NAME) . ". All rights reserved.</p>
+                <p>This email was sent from noreply@onseanews.co.za</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    ";
+    
+    // Send from noreply@onseanews.co.za
+    return sendEmail($toEmail, $subject, $message, 'noreply@onseanews.co.za', SITE_NAME);
+}
+
+/**
+ * Send advert approval email to business owner
+ */
+function sendAdvertApprovalEmail($advert) {
+    $ownerEmail = $advert['owner_email'] ?? null;
+    if (!$ownerEmail) {
+        return false; // No email to send to
+    }
+    
+    $ownerName = trim(($advert['owner_name'] ?? '') . ' ' . ($advert['owner_surname'] ?? ''));
+    if (empty($ownerName)) {
+        $ownerName = $advert['owner_username'] ?? 'User';
+    }
+    
+    $businessUrl = SITE_URL . baseUrl('/businesses.php');
+    
+    $subject = 'Your Advert Has Been Approved - ' . SITE_NAME;
+    
+    $advertType = ucfirst($advert['advert_type'] ?? 'basic');
+    $advertInfo = '<h3 style="margin-top: 0;">' . h($advert['business_name']) . '</h3>';
+    $advertInfo .= '<p><strong>Advert Type:</strong> ' . h($advertType) . '</p>';
+    
+    if (!empty($advert['event_title'])) {
+        $advertInfo .= '<p><strong>Event:</strong> ' . h($advert['event_title']) . '</p>';
+        if (!empty($advert['event_date'])) {
+            $advertInfo .= '<p><strong>Event Date:</strong> ' . h(date('Y-m-d', strtotime($advert['event_date']))) . '</p>';
+        }
+    }
+    
+    $message = "
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset='UTF-8'>
+        <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background-color: #4caf50; color: white; padding: 20px; text-align: center; }
+            .content { padding: 20px; background-color: #f5f5f5; }
+            .button { display: inline-block; padding: 12px 24px; background-color: #4caf50; color: #ffffff !important; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+            .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
+            .advert-info { background-color: white; padding: 15px; border-left: 4px solid #4caf50; margin: 20px 0; }
+        </style>
+    </head>
+    <body>
+        <div class='container'>
+            <div class='header'>
+                <h1>Advert Approved!</h1>
+            </div>
+            <div class='content'>
+                <p>Hello " . h($ownerName) . ",</p>
+                <p>Great news! Your advert has been reviewed and approved. It is now live on " . h(SITE_NAME) . ".</p>
+                <div class='advert-info'>
+                    " . $advertInfo . "
+                </div>
+                <p>Your advert will now be displayed to visitors on the website.</p>
+                <p>Thank you for using " . h(SITE_NAME) . "!</p>
+            </div>
+            <div class='footer'>
+                <p>&copy; " . date('Y') . " " . h(SITE_NAME) . ". All rights reserved.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    ";
+    
+    return sendEmail($ownerEmail, $subject, $message);
+}
+
+/**
+ * Send advert rejection email to business owner
+ */
+function sendAdvertRejectionEmail($advert, $rejectionReason) {
+    $ownerEmail = $advert['owner_email'] ?? null;
+    if (!$ownerEmail) {
+        return false; // No email to send to
+    }
+    
+    $ownerName = trim(($advert['owner_name'] ?? '') . ' ' . ($advert['owner_surname'] ?? ''));
+    if (empty($ownerName)) {
+        $ownerName = $advert['owner_username'] ?? 'User';
+    }
+    
+    $subject = 'Advert Submission Update - ' . SITE_NAME;
+    
+    $advertType = ucfirst($advert['advert_type'] ?? 'basic');
+    $advertInfo = '<h3 style="margin-top: 0;">' . h($advert['business_name']) . '</h3>';
+    $advertInfo .= '<p><strong>Advert Type:</strong> ' . h($advertType) . '</p>';
+    
+    if (!empty($advert['event_title'])) {
+        $advertInfo .= '<p><strong>Event:</strong> ' . h($advert['event_title']) . '</p>';
+    }
+    
+    // Include advert images
+    $bannerImage = '';
+    $displayImage = '';
+    
+    if (!empty($advert['banner_image'])) {
+        $bannerPath = str_replace('uploads/adverts/', 'uploads/graphics/', $advert['banner_image']);
+        $bannerUrl = SITE_URL . baseUrl('/' . ltrim($bannerPath, '/'));
+        $bannerImage = '<div style="margin: 15px 0;"><h4 style="margin-bottom: 10px;">Banner Image:</h4><img src="' . h($bannerUrl) . '" alt="Banner Image" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; display: block;"></div>';
+    }
+    
+    if (!empty($advert['display_image'])) {
+        $displayPath = str_replace('uploads/adverts/', 'uploads/graphics/', $advert['display_image']);
+        $displayUrl = SITE_URL . baseUrl('/' . ltrim($displayPath, '/'));
+        $displayImage = '<div style="margin: 15px 0;"><h4 style="margin-bottom: 10px;">Display Image:</h4><img src="' . h($displayUrl) . '" alt="Display Image" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; display: block;"></div>';
+    }
+    
+    $message = "
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset='UTF-8'>
+        <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background-color: #d32f2f; color: white; padding: 20px; text-align: center; }
+            .content { padding: 20px; background-color: #f5f5f5; }
+            .button { display: inline-block; padding: 12px 24px; background-color: #2c5f8d; color: #ffffff !important; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+            .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
+            .rejection-info { background-color: white; padding: 15px; border-left: 4px solid #d32f2f; margin: 20px 0; }
+            .reason-box { background-color: #ffebee; padding: 15px; border-radius: 4px; margin: 15px 0; }
+            .advert-images { background-color: white; padding: 15px; border-left: 4px solid #d32f2f; margin: 20px 0; }
+        </style>
+    </head>
+    <body>
+        <div class='container'>
+            <div class='header'>
+                <h1>Advert Submission Update</h1>
+            </div>
+            <div class='content'>
+                <p>Hello " . h($ownerName) . ",</p>
+                <p>We regret to inform you that your advert submission has been reviewed and unfortunately cannot be approved at this time.</p>
+                <div class='rejection-info'>
+                    " . $advertInfo . "
+                </div>
+                " . ($bannerImage || $displayImage ? '<div class="advert-images">' . $bannerImage . $displayImage . '</div>' : '') . "
+                <div class='reason-box'>
+                    <h4 style='margin-top: 0;'>Reason for Rejection:</h4>
+                    <p>" . nl2br(h($rejectionReason)) . "</p>
+                </div>
+                <p>If you have any questions or would like to resubmit your advert with corrections, please feel free to contact us.</p>
                 <p>Thank you for your interest in " . h(SITE_NAME) . ".</p>
             </div>
             <div class='footer'>

@@ -8,3 +8,4 @@ ALTER TABLE `bk_businesses`
 ADD INDEX `idx_location` (`latitude`, `longitude`);
 
 
+

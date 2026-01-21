@@ -115,15 +115,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             
             if ($emailsSent > 0) {
-                $success = 'Thank you for your message! We have received it and will get back to you soon.';
-                // Clear form
-                $name = '';
-                $email = '';
-                $subject = '';
-                $message = '';
-                // Regenerate CAPTCHA if needed
-                if ($showCaptcha) {
-                    $captchaCode = generateCaptcha();
+                // Save to database
+                $db = getDB();
+                $userId = isLoggedIn() ? getCurrentUser()['user_id'] : null;
+                
+                try {
+                    $stmt = $db->prepare("
+                        INSERT INTO " . TABLE_PREFIX . "contact_queries 
+                        (user_id, name, email, subject, message, status) 
+                        VALUES (?, ?, ?, ?, ?, 'new')
+                    ");
+                    $stmt->execute([$userId, $userName, $userEmail, $subject, $message]);
+                    
+                    $success = 'Thank you for your message! We have received it and will get back to you soon.';
+                    // Clear form
+                    $name = '';
+                    $email = '';
+                    $subject = '';
+                    $message = '';
+                    // Regenerate CAPTCHA if needed
+                    if ($showCaptcha) {
+                        $captchaCode = generateCaptcha();
+                    }
+                } catch (Exception $e) {
+                    error_log("Failed to save contact query to database: " . $e->getMessage());
+                    // Still show success since email was sent
+                    $success = 'Thank you for your message! We have received it and will get back to you soon.';
+                    // Clear form
+                    $name = '';
+                    $email = '';
+                    $subject = '';
+                    $message = '';
+                    // Regenerate CAPTCHA if needed
+                    if ($showCaptcha) {
+                        $captchaCode = generateCaptcha();
+                    }
                 }
             } else {
                 $error = 'Sorry, there was an error sending your message. Please try again later.';

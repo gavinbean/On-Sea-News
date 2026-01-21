@@ -51,7 +51,10 @@ function registerUser($data) {
         return ['success' => false, 'message' => 'Username already exists.'];
     }
     
-    // Email uniqueness check removed - same email can be used on different profiles
+    // Check if email already exists
+    if (emailExists($data['email'])) {
+        return ['success' => false, 'message' => 'Email address is already registered. Please use a different email or try logging in.'];
+    }
     
     try {
         // Geocode address using components
@@ -79,6 +82,22 @@ function registerUser($data) {
         }
         
         $db->beginTransaction();
+        
+        // CRITICAL: Re-check username and email within transaction to prevent race conditions
+        // This double-check pattern prevents concurrent registrations from both passing the initial check
+        $checkUsernameStmt = $db->prepare("SELECT user_id FROM " . TABLE_PREFIX . "users WHERE username = ? FOR UPDATE");
+        $checkUsernameStmt->execute([$data['username']]);
+        if ($checkUsernameStmt->fetch()) {
+            $db->rollBack();
+            return ['success' => false, 'message' => 'Username already exists.'];
+        }
+        
+        $checkEmailStmt = $db->prepare("SELECT user_id FROM " . TABLE_PREFIX . "users WHERE email = ? FOR UPDATE");
+        $checkEmailStmt->execute([$data['email']]);
+        if ($checkEmailStmt->fetch()) {
+            $db->rollBack();
+            return ['success' => false, 'message' => 'Email address is already registered. Please use a different email or try logging in.'];
+        }
         
         // Generate email verification token
         $verificationToken = generateToken();
@@ -119,6 +138,36 @@ function registerUser($data) {
             $userRoleStmt->execute([$userId, $role['role_id']]);
         }
         
+        // Check if there are any water_availability records with matching geolocation but no user_id
+        // If user has valid coordinates, link them to existing records
+        if (!empty($geocodeResult['latitude']) && !empty($geocodeResult['longitude'])) {
+            $userLatitude = round((float)$geocodeResult['latitude'], 6);
+            $userLongitude = round((float)$geocodeResult['longitude'], 6);
+            
+            // Find records with matching location but no user_id
+            $stmt = $db->prepare("
+                SELECT water_id 
+                FROM " . TABLE_PREFIX . "water_availability 
+                WHERE user_id IS NULL
+                AND ABS(latitude - ?) < 0.000001
+                AND ABS(longitude - ?) < 0.000001
+            ");
+            $stmt->execute([$userLatitude, $userLongitude]);
+            $matchingRecords = $stmt->fetchAll();
+            
+            // Update matching records with the new user_id
+            if (!empty($matchingRecords)) {
+                foreach ($matchingRecords as $record) {
+                    $updateStmt = $db->prepare("
+                        UPDATE " . TABLE_PREFIX . "water_availability 
+                        SET user_id = ?
+                        WHERE water_id = ?
+                    ");
+                    $updateStmt->execute([$userId, $record['water_id']]);
+                }
+            }
+        }
+        
         $db->commit();
         
         // Save water responses if provided
@@ -133,14 +182,34 @@ function registerUser($data) {
         // Send verification email
         require_once __DIR__ . '/email.php';
         $fullName = $data['name'] . ' ' . $data['surname'];
-        sendVerificationEmail($userId, $data['email'], $fullName, $verificationToken);
+        $emailSent = sendVerificationEmail($userId, $data['email'], $fullName, $verificationToken);
+        
+        if (!$emailSent) {
+            error_log("Failed to send verification email to: {$data['email']} for user_id: $userId");
+            // Still return success to user (don't reveal email issues), but log the error
+            // User can use resend-verification.php if needed
+        }
         
         return ['success' => true, 'message' => 'Registration successful! Please check your email to verify your account before logging in.', 'user_id' => $userId];
         
     } catch (PDOException $e) {
         $db->rollBack();
         error_log("Registration Error: " . $e->getMessage());
-        return ['success' => false, 'message' => 'Registration failed. Please try again.'];
+        
+        // Check for duplicate entry errors (SQLSTATE 23000)
+        // This handles race conditions where two users register simultaneously
+        if ($e->getCode() == 23000 || strpos($e->getMessage(), 'Duplicate entry') !== false) {
+            // Check which field caused the duplicate
+            if (strpos($e->getMessage(), 'username') !== false || strpos($e->getMessage(), 'idx_username') !== false) {
+                return ['success' => false, 'message' => 'Username already exists. Please choose a different username.'];
+            }
+            if (strpos($e->getMessage(), 'email') !== false || strpos($e->getMessage(), 'idx_email') !== false) {
+                return ['success' => false, 'message' => 'Email address is already registered. Please use a different email or try logging in.'];
+            }
+            return ['success' => false, 'message' => 'This username or email is already registered. Please try again with different credentials.'];
+        }
+        
+        return ['success' => false, 'message' => 'Registration failed. Please try again. If the problem persists, contact support.'];
     }
 }
 
@@ -182,19 +251,25 @@ function loginUser($username, $password, $rememberMe = false) {
         $token = generateToken();
         $expires = time() + (30 * 24 * 60 * 60); // 30 days
         
-        // Store token in database
+        // Store token in database (allow multiple tokens per user for multiple devices)
         $tokenHash = hash('sha256', $token);
+        
+        // Get device info for tracking (optional but helpful)
+        $deviceInfo = $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown';
+        // Truncate to fit column size
+        if (strlen($deviceInfo) > 255) {
+            $deviceInfo = substr($deviceInfo, 0, 252) . '...';
+        }
+        
         $stmt = $db->prepare("
             INSERT INTO " . TABLE_PREFIX . "remember_tokens 
-            (user_id, token_hash, expires_at, created_at) 
-            VALUES (?, ?, ?, NOW())
-            ON DUPLICATE KEY UPDATE token_hash = ?, expires_at = ?, created_at = NOW()
+            (user_id, token_hash, device_info, expires_at, created_at, last_used_at) 
+            VALUES (?, ?, ?, ?, NOW(), NOW())
         ");
         $stmt->execute([
             $user['user_id'],
             $tokenHash,
-            date('Y-m-d H:i:s', $expires),
-            $tokenHash,
+            $deviceInfo,
             date('Y-m-d H:i:s', $expires)
         ]);
         
@@ -262,7 +337,16 @@ function requestPasswordReset($email) {
     
     // Send password reset email
     require_once __DIR__ . '/email.php';
-    sendPasswordResetEmail($email, $user['username'], $token);
+    $emailSent = sendPasswordResetEmail($email, $user['username'], $token);
+    
+    if (!$emailSent) {
+        error_log("Failed to send password reset email to: $email");
+        // Still return success to user for security (don't reveal if email exists)
+        return [
+            'success' => true, 
+            'message' => 'If the email exists, a password reset link has been sent.'
+        ];
+    }
     
     return [
         'success' => true, 

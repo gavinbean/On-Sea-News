@@ -4,7 +4,7 @@ This document explains how to set up the automated daily water availability repo
 
 ## Overview
 
-The daily water report script (`cron/daily-water-report.php`) automatically:
+The daily water report script (`/usr/bin/php-wrapper www130.jnb2.host-h.net/public_html/onseanews.co.za/`) automatically:
 - Collects all water availability data for the current day
 - Generates a map image showing all data points
 - Creates a table listing all addresses with water status
@@ -117,5 +117,6 @@ The daily report email includes:
 - Only active email recipients receive the report
 - The map image is embedded directly in the email (no download required)
 - Map is automatically sized to include all data points
+
 
 

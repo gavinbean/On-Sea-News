@@ -17,16 +17,20 @@ $stmt = $db->prepare("
         w.has_water,
         w.latitude,
         w.longitude,
+        u.name,
+        u.surname,
+        u.telephone,
+        u.email,
         u.street_number,
         u.street_name,
         u.suburb,
         u.town
     FROM " . TABLE_PREFIX . "water_availability w
-    JOIN " . TABLE_PREFIX . "users u ON w.user_id = u.user_id
+    LEFT JOIN " . TABLE_PREFIX . "users u ON w.user_id = u.user_id
     WHERE w.report_date BETWEEN ? AND ?
     AND w.latitude IS NOT NULL
     AND w.longitude IS NOT NULL
-    ORDER BY w.report_date DESC, u.town, u.street_name, u.street_number
+    ORDER BY w.report_date DESC, COALESCE(u.town, ''), COALESCE(u.street_name, ''), COALESCE(u.street_number, '')
 ");
 $stmt->execute([$fromDate, $toDate]);
 $reports = $stmt->fetchAll();
@@ -39,6 +43,16 @@ foreach ($reports as &$report) {
     if (!empty($report['suburb'])) $addressParts[] = $report['suburb'];
     if (!empty($report['town'])) $addressParts[] = $report['town'];
     $report['address'] = implode(', ', $addressParts) ?: 'Address not provided';
+    
+    // Build full name
+    $nameParts = [];
+    if (!empty($report['name'])) $nameParts[] = $report['name'];
+    if (!empty($report['surname'])) $nameParts[] = $report['surname'];
+    $report['full_name'] = implode(' ', $nameParts) ?: 'N/A';
+    
+    // Ensure telephone and email are set
+    $report['telephone'] = $report['telephone'] ?? 'N/A';
+    $report['email'] = $report['email'] ?? 'N/A';
 }
 unset($report);
 

@@ -47,12 +47,23 @@ Options -Indexes
 # Set default file
 DirectoryIndex index.php
 
+# Redirect favicon.ico to actual favicon
+RewriteRule ^favicon\.ico$ /images/icons/icon-192x192.png [L,R=301]
+
 # PHP settings (if allowed by hosting)
 <IfModule mod_php7.c>
-    php_value upload_max_filesize 10M
-    php_value post_max_size 10M
+    php_value upload_max_filesize 50M
+    php_value post_max_size 50M
     php_value max_execution_time 300
     php_value max_input_time 300
+    php_value max_input_vars 5000
+</IfModule>
+<IfModule mod_php8.c>
+    php_value upload_max_filesize 50M
+    php_value post_max_size 50M
+    php_value max_execution_time 300
+    php_value max_input_time 300
+    php_value max_input_vars 5000
 </IfModule>
 
 # Error pages (optional)

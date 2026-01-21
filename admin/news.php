@@ -15,18 +15,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $excerpt = $_POST['excerpt'] ?? '';
             $published = isset($_POST['published']) ? 1 : 0;
             $isPinned = isset($_POST['is_pinned']) ? 1 : 0;
+            $showPublishDate = isset($_POST['show_publish_date']) ? 1 : 0;
+            $showAuthor = isset($_POST['show_author']) ? 1 : 0;
             $userId = getCurrentUserId();
             
             if (empty($title) || empty($content)) {
                 $error = 'Title and content are required.';
             } else {
-                $stmt = $db->prepare("
-                    INSERT INTO " . TABLE_PREFIX . "news 
-                    (author_id, title, content, excerpt, published, published_at, is_pinned)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ");
-                $publishedAt = $published ? date('Y-m-d H:i:s') : null;
-                $stmt->execute([$userId, $title, $content, $excerpt, $published, $publishedAt, $isPinned]);
+                // Check if new columns exist
+                $columnsExist = false;
+                try {
+                    $testStmt = $db->query("SELECT show_publish_date, show_author FROM " . TABLE_PREFIX . "news LIMIT 1");
+                    $columnsExist = true;
+                } catch (Exception $e) {
+                    $columnsExist = false;
+                }
+                
+                if ($columnsExist) {
+                    $stmt = $db->prepare("
+                        INSERT INTO " . TABLE_PREFIX . "news 
+                        (author_id, title, content, excerpt, published, published_at, is_pinned, show_publish_date, show_author)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ");
+                    $publishedAt = $published ? date('Y-m-d H:i:s') : null;
+                    $stmt->execute([$userId, $title, $content, $excerpt, $published, $publishedAt, $isPinned, $showPublishDate, $showAuthor]);
+                } else {
+                    $stmt = $db->prepare("
+                        INSERT INTO " . TABLE_PREFIX . "news 
+                        (author_id, title, content, excerpt, published, published_at, is_pinned)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ");
+                    $publishedAt = $published ? date('Y-m-d H:i:s') : null;
+                    $stmt->execute([$userId, $title, $content, $excerpt, $published, $publishedAt, $isPinned]);
+                }
                 $message = 'News item created successfully.';
             }
         } elseif ($_POST['action'] === 'update') {
@@ -36,6 +57,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $excerpt = $_POST['excerpt'] ?? '';
             $published = isset($_POST['published']) ? 1 : 0;
             $isPinned = isset($_POST['is_pinned']) ? 1 : 0;
+            $showPublishDate = isset($_POST['show_publish_date']) ? 1 : 0;
+            $showAuthor = isset($_POST['show_author']) ? 1 : 0;
             
             $stmt = $db->prepare("
                 SELECT published, published_at FROM " . TABLE_PREFIX . "news WHERE news_id = ?
@@ -45,18 +68,111 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             $publishedAt = $published && !$existing['published_at'] ? date('Y-m-d H:i:s') : $existing['published_at'];
             
-            $stmt = $db->prepare("
-                UPDATE " . TABLE_PREFIX . "news 
-                SET title = ?, content = ?, excerpt = ?, published = ?, published_at = ?, is_pinned = ?
-                WHERE news_id = ?
-            ");
-            $stmt->execute([$title, $content, $excerpt, $published, $publishedAt, $isPinned, $newsId]);
+            // Check if new columns exist
+            $columnsExist = false;
+            try {
+                $testStmt = $db->query("SELECT show_publish_date, show_author FROM " . TABLE_PREFIX . "news LIMIT 1");
+                $columnsExist = true;
+            } catch (Exception $e) {
+                $columnsExist = false;
+            }
+            
+            if ($columnsExist) {
+                $stmt = $db->prepare("
+                    UPDATE " . TABLE_PREFIX . "news 
+                    SET title = ?, content = ?, excerpt = ?, published = ?, published_at = ?, is_pinned = ?, show_publish_date = ?, show_author = ?
+                    WHERE news_id = ?
+                ");
+                $stmt->execute([$title, $content, $excerpt, $published, $publishedAt, $isPinned, $showPublishDate, $showAuthor, $newsId]);
+            } else {
+                $stmt = $db->prepare("
+                    UPDATE " . TABLE_PREFIX . "news 
+                    SET title = ?, content = ?, excerpt = ?, published = ?, published_at = ?, is_pinned = ?
+                    WHERE news_id = ?
+                ");
+                $stmt->execute([$title, $content, $excerpt, $published, $publishedAt, $isPinned, $newsId]);
+            }
             $message = 'News item updated successfully.';
         } elseif ($_POST['action'] === 'delete') {
             $newsId = $_POST['news_id'] ?? 0;
-            $stmt = $db->prepare("DELETE FROM " . TABLE_PREFIX . "news WHERE news_id = ?");
-            $stmt->execute([$newsId]);
-            $message = 'News item deleted successfully.';
+            if ($newsId > 0) {
+                $stmt = $db->prepare("DELETE FROM " . TABLE_PREFIX . "news WHERE news_id = ?");
+                $stmt->execute([$newsId]);
+                $message = 'News item deleted successfully.';
+                
+                // Redirect to prevent resubmission
+                header('Location: ' . baseUrl('/admin/news.php?message=' . urlencode($message)));
+                exit;
+            } else {
+                $error = 'Invalid news ID.';
+            }
+        } elseif ($_POST['action'] === 'convert_to_faq') {
+            $newsId = $_POST['news_id'] ?? 0;
+            
+            if ($newsId > 0) {
+                // Get the news item
+                $stmt = $db->prepare("
+                    SELECT title, content, excerpt 
+                    FROM " . TABLE_PREFIX . "news 
+                    WHERE news_id = ?
+                ");
+                $stmt->execute([$newsId]);
+                $newsItem = $stmt->fetch();
+                
+                if ($newsItem) {
+                    // Map news fields to FAQ fields correctly:
+                    // News title → FAQ question
+                    // News excerpt → FAQ excerpt (preview)
+                    // News content → FAQ answer (full content with HTML preserved)
+                    $question = $newsItem['title'];
+                    $excerpt = !empty($newsItem['excerpt']) ? $newsItem['excerpt'] : null;
+                    $answer = $newsItem['content']; // Preserve HTML from TinyMCE
+                    
+                    // Check if excerpt column exists in FAQ table
+                    $faqExcerptExists = false;
+                    try {
+                        $testStmt = $db->query("SELECT excerpt FROM " . TABLE_PREFIX . "faq LIMIT 1");
+                        $faqExcerptExists = true;
+                    } catch (Exception $e) {
+                        $faqExcerptExists = false;
+                    }
+                    
+                    // Get the highest display_order to append at the end
+                    $stmt = $db->query("SELECT MAX(display_order) as max_order FROM " . TABLE_PREFIX . "faq");
+                    $maxOrder = $stmt->fetch();
+                    $displayOrder = ($maxOrder['max_order'] ?? 0) + 1;
+                    
+                    // Create FAQ entry with proper field mapping
+                    if ($faqExcerptExists) {
+                        $stmt = $db->prepare("
+                            INSERT INTO " . TABLE_PREFIX . "faq (question, excerpt, answer, display_order, is_active)
+                            VALUES (?, ?, ?, ?, 1)
+                        ");
+                        $stmt->execute([$question, $excerpt, $answer, $displayOrder]);
+                    } else {
+                        // Fallback: insert without excerpt column
+                        $stmt = $db->prepare("
+                            INSERT INTO " . TABLE_PREFIX . "faq (question, answer, display_order, is_active)
+                            VALUES (?, ?, ?, 1)
+                        ");
+                        $stmt->execute([$question, $answer, $displayOrder]);
+                    }
+                    
+                    // Delete the news item
+                    $stmt = $db->prepare("DELETE FROM " . TABLE_PREFIX . "news WHERE news_id = ?");
+                    $stmt->execute([$newsId]);
+                    
+                    $message = 'News item successfully converted to FAQ and removed from news.';
+                    
+                    // Redirect to prevent resubmission
+                    header('Location: ' . baseUrl('/admin/news.php?message=' . urlencode($message)));
+                    exit;
+                } else {
+                    $error = 'News item not found.';
+                }
+            } else {
+                $error = 'Invalid news ID.';
+            }
         }
     }
 }
@@ -83,27 +199,217 @@ document.addEventListener('DOMContentLoaded', function() {
         tinymce.init({
             selector,
             height: selector === '#content' ? 420 : 180,
+            branding: false,
             menubar: 'file edit view insert format tools table help',
             plugins: 'advlist autolink lists link image charmap preview anchor searchreplace visualblocks code fullscreen insertdatetime media table code help wordcount',
             toolbar: 'undo redo | blocks | bold italic underline strikethrough | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | link image media table | removeformat | code fullscreen',
             paste_data_images: true,
+            paste_as_text: false,
+            paste_merge_formats: true,
+            paste_auto_cleanup_on_paste: false,
+            paste_remove_styles_if_webkit: false,
+            paste_strip_class_attributes: 'none',
+            paste_retain_style_properties: 'all',
+            paste_webkit_styles: 'all',
             image_title: true,
             automatic_uploads: true,
-            images_upload_handler: (blobInfo) => new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = () => reject('Image upload failed');
-                reader.readAsDataURL(blobInfo.blob());
-            }),
-            content_style: 'body { font-family: Arial, sans-serif; font-size: 14px; } ul, ol { padding-left: 40px !important; }',
-            invalid_styles: 'padding padding-left padding-right padding-top padding-bottom',
+            images_upload_handler: (blobInfo) => {
+                return new Promise((resolve, reject) => {
+                    try {
+                        // Limit image size to prevent extremely large base64 strings (2MB max)
+                        const maxSize = 2 * 1024 * 1024;
+                        if (blobInfo.blob().size > maxSize) {
+                            reject('Image is too large. Maximum size is 2MB. Please reduce the image size and try again.');
+                            return;
+                        }
+                        
+                        const reader = new FileReader();
+                        reader.onload = function() {
+                            const result = reader.result;
+                            console.log('Image uploaded successfully, size: ' + Math.round(result.length / 1024) + 'KB');
+                            resolve(result);
+                        };
+                        reader.onerror = function(error) {
+                            console.error('Image upload error:', error);
+                            reject('Image upload failed. Please try again.');
+                        };
+                        reader.readAsDataURL(blobInfo.blob());
+                    } catch (error) {
+                        console.error('Image upload handler error:', error);
+                        reject('Image upload failed: ' + error.message);
+                    }
+                });
+            },
+            // Image alignment and wrapping options
+            image_advtab: true,
+            image_class_list: [
+                {title: 'None', value: ''},
+                {title: 'Float Left', value: 'float-left'},
+                {title: 'Float Right', value: 'float-right'},
+                {title: 'Center', value: 'center-image'},
+                {title: 'Full Width', value: 'full-width'}
+            ],
+            image_caption: true,
+            image_dimensions: true,
+            image_description: true,
+            // Allow all image styles for wrapping
             valid_styles: {
-                '*': 'line-height'
+                '*': 'line-height, float, margin, margin-left, margin-right, margin-top, margin-bottom, padding, padding-left, padding-right, padding-top, padding-bottom, width, height, max-width, max-height, display, vertical-align, text-align'
+            },
+            extended_valid_elements: 'img[class|src|border=0|alt|title|hspace|vspace|width|height|align|onmouseover|onmouseout|name|style|usemap]',
+            content_style: 'body { font-family: Arial, sans-serif; font-size: 14px; } ul, ol { padding-left: 40px !important; } img.float-left { float: left; margin: 0 1rem 1rem 0; max-width: 50%; } img.float-right { float: right; margin: 0 0 1rem 1rem; max-width: 50%; } img.center-image { display: block; margin: 1rem auto; max-width: 100%; } img.full-width { width: 100%; height: auto; display: block; margin: 1rem 0; }',
+            invalid_styles: '',
+            // Enable image resizing
+            image_resize: true,
+            image_resize_constrain: true,
+            setup: function(editor) {
+                editor.on('init', function() {
+                    // Remove required attribute from textarea since TinyMCE handles it
+                    const textarea = document.getElementById(editor.id);
+                    if (textarea) {
+                        textarea.removeAttribute('required');
+                    }
+                });
+                
+                // Auto-save on change to ensure content is always in sync
+                editor.on('change', function() {
+                    editor.save();
+                });
+                
+                // Save on blur to ensure content is saved when user moves away
+                editor.on('blur', function() {
+                    editor.save();
+                });
+                
+                // Handle image insertion to ensure content is preserved
+                editor.on('ObjectResized', function(e) {
+                    editor.save(); // Save after image resize
+                });
+                
+                // Handle paste events to ensure content is preserved
+                editor.on('paste', function(e) {
+                    // Store current content before paste to ensure it's preserved
+                    const currentContent = editor.getContent();
+                    console.log('Admin news paste - current content length:', currentContent.length);
+                    // Auto-save after paste operations complete
+                    setTimeout(function() {
+                        const newContent = editor.getContent();
+                        console.log('Admin news paste - new content length:', newContent.length);
+                        // If content was lost during paste (safety check)
+                        if ((!newContent || newContent.trim() === '' || newContent === '<p></p>') && currentContent && currentContent.trim() !== '' && currentContent !== '<p></p>') {
+                            console.warn('Content appears to have been lost during paste, restoring...');
+                            // Restore previous content
+                            editor.setContent(currentContent);
+                            // Wait a bit then check again
+                            setTimeout(function() {
+                                const restoredContent = editor.getContent();
+                                if (!restoredContent || restoredContent.trim() === '') {
+                                    console.error('Failed to restore content after paste');
+                                }
+                                editor.save();
+                            }, 100);
+                        } else {
+                            editor.save();
+                        }
+                    }, 300);
+                });
+                
+                // Save content before any resize operations
+                editor.on('ObjectResizeStart', function(e) {
+                    editor.save();
+                });
             }
         });
     };
     initTiny('#content');
     initTiny('#excerpt');
+    
+    // Form submission handler for create news form - ensure TinyMCE content is saved before submission
+    const createFormInput = document.querySelector('input[name="action"][value="create"]');
+    if (createFormInput) {
+        const form = createFormInput.closest('form');
+        if (form) {
+            form.addEventListener('submit', function(e) {
+                e.preventDefault(); // Always prevent default first to handle TinyMCE content
+                
+                // Get TinyMCE editors
+                const contentEditor = tinymce.get('content');
+                const excerptEditor = tinymce.get('excerpt');
+                
+                // Save all TinyMCE editors first to ensure content is in textareas
+                if (contentEditor) {
+                    contentEditor.save(); // Save content to textarea
+                }
+                if (excerptEditor) {
+                    excerptEditor.save(); // Save excerpt to textarea
+                }
+                
+                // Wait for save to complete
+                setTimeout(function() {
+                    // Get content from textarea (after save)
+                    const contentTextarea = document.getElementById('content');
+                    const excerptTextarea = document.getElementById('excerpt');
+                    
+                    let content = contentTextarea ? contentTextarea.value : '';
+                    const excerpt = excerptTextarea ? excerptTextarea.value : '';
+                    
+                    // Check if content is actually there
+                    let hasContent = false;
+                    if (content && content.trim() !== '') {
+                        let contentStripped = content.replace(/<p>&nbsp;<\/p>/g, '').replace(/<p><\/p>/g, '').replace(/<br\s*\/?>/gi, '').trim();
+                        contentStripped = contentStripped.replace(/<p>\s*<\/p>/g, '').trim();
+                        
+                        const hasText = contentStripped.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim().length > 0;
+                        const hasImages = content.includes('<img');
+                        const hasMedia = content.includes('<iframe') || content.includes('<video') || content.includes('<embed');
+                        
+                        hasContent = (hasText || hasImages || hasMedia) && contentStripped !== '' && contentStripped !== '<p></p>' && contentStripped !== '<p>&nbsp;</p>';
+                    }
+                    
+                    // If content from textarea appears empty, try to get it from editor
+                    if (!hasContent && contentEditor) {
+                        const editorContent = contentEditor.getContent();
+                        if (editorContent && editorContent.trim() !== '' && editorContent !== '<p></p>') {
+                            contentTextarea.value = editorContent;
+                            content = editorContent;
+                            const editorContentStripped = editorContent.replace(/<p>&nbsp;<\/p>/g, '').replace(/<p><\/p>/g, '').trim();
+                            const editorHasText = editorContent.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim().length > 0;
+                            const editorHasImages = editorContent.includes('<img');
+                            const editorHasMedia = editorContent.includes('<iframe') || editorContent.includes('<video') || editorContent.includes('<embed');
+                            
+                            if (editorContentStripped !== '' && editorContentStripped !== '<p></p>' && (editorHasText || editorHasImages || editorHasMedia)) {
+                                hasContent = true;
+                            }
+                        }
+                    }
+                    
+                    // Final check - ensure content is set
+                    if (!content || content.trim() === '') {
+                        content = contentTextarea ? contentTextarea.value : '';
+                    }
+                    
+                    if (!hasContent) {
+                        alert('Content is required. Please add text or images to your news item before submitting.');
+                        if (contentEditor) {
+                            contentEditor.focus();
+                        }
+                        return false;
+                    }
+                    
+                    // Ensure textareas have the content before submission
+                    if (contentTextarea && content) {
+                        contentTextarea.value = content;
+                    }
+                    if (excerptTextarea) {
+                        excerptTextarea.value = excerpt;
+                    }
+                    
+                    // All validation passed, submit the form
+                    form.submit();
+                }, 150);
+            });
+        }
+    }
 });
 
 function getFieldValue(id) {
@@ -141,6 +447,30 @@ function showNewsPreview() {
     container.style.display = 'block';
     container.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+
+// Handle news title hover tooltips
+document.addEventListener('DOMContentLoaded', function() {
+    const newsTitles = document.querySelectorAll('.news-title-hover');
+    newsTitles.forEach(function(titleEl) {
+        const tooltip = titleEl.nextElementSibling;
+        if (!tooltip || !tooltip.classList.contains('news-tooltip')) return;
+        
+        titleEl.addEventListener('mouseenter', function() {
+            tooltip.style.display = 'block';
+            // Position tooltip to prevent overflow
+            const rect = tooltip.getBoundingClientRect();
+            const windowWidth = window.innerWidth;
+            if (rect.right > windowWidth) {
+                tooltip.style.left = 'auto';
+                tooltip.style.right = '0';
+            }
+        });
+        
+        titleEl.addEventListener('mouseleave', function() {
+            tooltip.style.display = 'none';
+        });
+    });
+});
 </script>
 
 <div class="container">
@@ -172,7 +502,7 @@ function showNewsPreview() {
                 
                 <div class="form-group">
                     <label for="content">Content: <span class="required">*</span></label>
-                    <textarea id="content" name="content" rows="10" required></textarea>
+                    <textarea id="content" name="content" rows="10"></textarea>
                 </div>
                 
                 <div class="form-group">
@@ -188,6 +518,20 @@ function showNewsPreview() {
                         Pin on Top
                     </label>
                     <small style="display: block; color: #666; margin-top: 0.25rem;">Pinned items will always appear first in the news listing</small>
+                </div>
+                
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="show_publish_date" name="show_publish_date" value="1" checked>
+                        Show publish date on news item
+                    </label>
+                </div>
+                
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="show_author" name="show_author" value="1" checked>
+                        Show author name on news item
+                    </label>
                 </div>
                 
                 <div class="form-group">
@@ -208,27 +552,75 @@ function showNewsPreview() {
         
         <div class="news-list">
             <h2>Existing News Items</h2>
-            <?php foreach ($newsItems as $news): ?>
-                <div class="news-item">
-                    <div class="news-item-header">
-                        <h3><?= h($news['title']) ?></h3>
-                        <div class="news-item-meta">
-                            By <?= h($news['username']) ?> | 
-                            Created: <?= formatDate($news['created_at']) ?> |
-                            Status: <?= $news['published'] ? 'Published' : 'Draft' ?>
-                            <?php if (isset($news['is_pinned']) && $news['is_pinned']): ?>
-                                | <strong style="color: #2c5f8d;">📌 Pinned</strong>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                    <div class="news-item-content">
-                        <p><?= h(substr($news['content'], 0, 200)) ?>...</p>
-                    </div>
-                    <div class="news-item-footer">
-                        <a href="<?= baseUrl('/admin/news-edit.php?id=' . $news['news_id']) ?>" class="btn btn-secondary">Edit</a>
-                    </div>
-                </div>
-            <?php endforeach; ?>
+            <?php if (empty($newsItems)): ?>
+                <p>No news items found.</p>
+            <?php else: ?>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Status</th>
+                            <th>Pinned</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($newsItems as $news): 
+                            // Prepare tooltip content
+                            $author = h($news['username']);
+                            $date = formatDate($news['created_at']);
+                            $preview = h(substr(strip_tags($news['content']), 0, 300));
+                            if (strlen(strip_tags($news['content'])) > 300) {
+                                $preview .= '...';
+                            }
+                            ?>
+                            <tr>
+                                <td>
+                                    <div style="position: relative; display: inline-block;">
+                                        <span class="news-title-hover" style="cursor: help; text-decoration: underline; text-decoration-style: dotted; text-decoration-color: #999;">
+                                            <?= h($news['title']) ?>
+                                        </span>
+                                        <div class="news-tooltip" style="display: none; position: absolute; bottom: 100%; left: 0; background-color: #333; color: white; padding: 0.75rem 1rem; border-radius: 4px; min-width: 300px; max-width: 500px; z-index: 1000; margin-bottom: 0.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.2); font-size: 0.875rem; line-height: 1.5; white-space: normal;">
+                                            <div style="margin-bottom: 0.5rem;"><strong>Author:</strong> <?= $author ?></div>
+                                            <div style="margin-bottom: 0.5rem;"><strong>Date:</strong> <?= $date ?></div>
+                                            <div style="border-top: 1px solid rgba(255,255,255,0.2); padding-top: 0.5rem; margin-top: 0.5rem;"><strong>Preview:</strong><br><?= nl2br($preview) ?></div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <?php if ($news['published']): ?>
+                                        <span style="color: green;">Published</span>
+                                    <?php else: ?>
+                                        <span style="color: orange;">Draft</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if (isset($news['is_pinned']) && $news['is_pinned']): ?>
+                                        <span style="color: #2c5f8d;">📌 Yes</span>
+                                    <?php else: ?>
+                                        <span style="color: #999;">No</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td style="white-space: nowrap; min-width: 350px;">
+                                    <div style="display: flex; gap: 0.25rem; flex-wrap: nowrap; align-items: center;">
+                                        <a href="<?= baseUrl('/admin/news-edit.php?id=' . $news['news_id']) ?>" class="btn btn-sm btn-secondary" style="flex-shrink: 0;">Edit</a>
+                                        <form method="POST" action="" style="display: inline-flex; margin: 0; flex-shrink: 0;" onsubmit="return confirm('Are you sure you want to convert this news item to an FAQ? The news item will be deleted after conversion.');">
+                                            <input type="hidden" name="action" value="convert_to_faq">
+                                            <input type="hidden" name="news_id" value="<?= $news['news_id'] ?>">
+                                            <button type="submit" class="btn btn-sm btn-info" style="white-space: nowrap;">Move to FAQ</button>
+                                        </form>
+                                        <form method="POST" action="" style="display: inline-flex; margin: 0; flex-shrink: 0;" onsubmit="return confirm('Are you sure you want to delete this news item? This action cannot be undone.');">
+                                            <input type="hidden" name="action" value="delete">
+                                            <input type="hidden" name="news_id" value="<?= $news['news_id'] ?>">
+                                            <button type="submit" class="btn btn-sm btn-danger" style="flex-shrink: 0;">Delete</button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
         </div>
     </div>
 </div>

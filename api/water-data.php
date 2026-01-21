@@ -1,5 +1,10 @@
 <?php
 header('Content-Type: application/json');
+// Prevent caching on iOS and other browsers
+header('Cache-Control: no-cache, no-store, must-revalidate');
+header('Pragma: no-cache');
+header('Expires: 0');
+
 require_once __DIR__ . '/../includes/functions.php';
 
 $date = $_GET['date'] ?? date('Y-m-d');
@@ -22,7 +27,7 @@ $stmt = $db->prepare("
         u.suburb, 
         u.town
     FROM " . TABLE_PREFIX . "water_availability w
-    JOIN " . TABLE_PREFIX . "users u ON w.user_id = u.user_id
+    LEFT JOIN " . TABLE_PREFIX . "users u ON w.user_id = u.user_id
     WHERE w.report_date = ?
     AND w.latitude IS NOT NULL
     AND w.longitude IS NOT NULL
@@ -39,6 +44,11 @@ foreach ($reports as &$report) {
     if (!empty($report['suburb'])) $addressParts[] = $report['suburb'];
     if (!empty($report['town'])) $addressParts[] = $report['town'];
     $report['address'] = implode(', ', $addressParts) ?: 'Address not provided';
+    // Set name to 'Imported Data' or 'N/A' if user_id is NULL
+    if (empty($report['user_id'])) {
+        $report['name'] = 'Imported Data';
+        $report['surname'] = '';
+    }
 }
 unset($report);
 

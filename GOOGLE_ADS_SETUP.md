@@ -13,7 +13,7 @@ A fixed bottom banner has been added to display Google AdSense ads. The banner s
 ### 2. Update Configuration Files
 
 #### Update `includes/header.php`
-Replace `ca-pub-XXXXXXXXXXXXXX` with your actual Google AdSense Publisher ID:
+Replace the publisher ID with your site ID `ca-pub-9986887492350930`:
 ```php
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXXXXXXX"
         crossorigin="anonymous"></script>
@@ -21,13 +21,13 @@ Replace `ca-pub-XXXXXXXXXXXXXX` with your actual Google AdSense Publisher ID:
 
 #### Update `includes/footer.php`
 Replace the placeholder values:
-- `ca-pub-XXXXXXXXXXXXXX` with your Publisher ID
+- `ca-pub-XXXXXXXXXXXXXX` with `ca-pub-9986887492350930`
 - `XXXXXXXXXX` with your Ad Slot ID
 
 ```php
 <ins class="adsbygoogle"
      style="display:block"
-     data-ad-client="ca-pub-XXXXXXXXXXXXXX"
+     data-ad-client="ca-pub-9986887492350930"
      data-ad-slot="XXXXXXXXXX"
      data-ad-format="auto"
      data-full-width-responsive="true"></ins>
@@ -58,4 +58,5 @@ If ads don't appear:
 3. Ensure your site is added to your AdSense account
 4. Check browser console for any JavaScript errors
 5. Wait a few minutes for ads to initialize (can take up to 10 minutes)
+
 

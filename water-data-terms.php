@@ -16,7 +16,7 @@ include 'includes/header.php';
             <h2>Privacy and Confidentiality</h2>
             <ul>
                 <li><strong>No Personal Information Disclosure:</strong> No personal questions answered or personal information will be publicly linked to any individual.</li>
-                <li><strong>Aggregated Data Only:</strong> Water availability data will be displayed in aggregated form on public maps and reports.</li>
+                <li><strong>Geographical Data:</strong> Water availability data will be displayed in geographic form on public maps and reports, only showing the water status.</li>
                 <li><strong>Anonymous Display:</strong> Your specific answers and personal details will never be displayed publicly.</li>
             </ul>
             

@@ -151,6 +151,19 @@ $reports = $stmt->fetchAll();
 $user = getCurrentUser();
 $userId = getCurrentUserId();
 
+// Get user's water reports for "My Reports" tab
+$userReports = [];
+if ($userId) {
+    $stmt = $db->prepare("
+        SELECT report_date, has_water, reported_at
+        FROM " . TABLE_PREFIX . "water_availability
+        WHERE user_id = ?
+        ORDER BY report_date DESC, reported_at DESC
+    ");
+    $stmt->execute([$userId]);
+    $userReports = $stmt->fetchAll();
+}
+
 $pageTitle = 'Water Availability';
 include 'includes/header.php';
 ?>
@@ -172,6 +185,14 @@ include 'includes/header.php';
             <div class="alert alert-error"><?= $error ?></div>
         <?php endif; ?>
         
+        <!-- Tabs -->
+        <div class="water-tabs">
+            <button class="tab-button active" onclick="switchTab('tracking')">Tracking</button>
+            <button class="tab-button" onclick="switchTab('my-reports')">My Water Reports</button>
+        </div>
+        
+        <!-- Tracking Tab -->
+        <div id="tracking-tab" class="tab-content active">
         <div class="water-report-form">
             <h2>Report Your Water Status</h2>
             <form method="POST" action="" id="waterReportForm">
@@ -273,8 +294,53 @@ include 'includes/header.php';
         </div>
         
         <div id="map" style="height: 600px; width: 100%; margin-top: 2rem;"></div>
-    </div>
         </div>
+        </div>
+        
+        <!-- My Reports Tab -->
+        <div id="my-reports-tab" class="tab-content">
+            <h2>My Water Reports</h2>
+            <?php if (empty($userReports)): ?>
+                <p>You haven't submitted any water availability reports yet.</p>
+            <?php else: ?>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Availability</th>
+                            <th>Reported At</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($userReports as $report): ?>
+                            <tr>
+                                <td><?= formatDate($report['report_date'], 'Y-m-d') ?></td>
+                                <td>
+                                    <?php
+                                    $statusText = '';
+                                    $statusColor = '';
+                                    if ($report['has_water'] == 1) {
+                                        $statusText = 'Yes';
+                                        $statusColor = '#27ae60';
+                                    } elseif ($report['has_water'] == 0) {
+                                        $statusText = 'No';
+                                        $statusColor = '#e74c3c';
+                                    } elseif ($report['has_water'] == 2) {
+                                        $statusText = 'Intermittent';
+                                        $statusColor = '#f39c12';
+                                    }
+                                    ?>
+                                    <span style="color: <?= $statusColor ?>; font-weight: 600;"><?= h($statusText) ?></span>
+                                </td>
+                                <td><?= formatDate($report['reported_at'], 'Y-m-d H:i:s') ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        </div>
+    </div>
+</div>
         
 <!-- Animation Modal - Must be outside container for proper positioning -->
 <div id="animation-modal" class="animation-modal">
@@ -331,13 +397,56 @@ let currentAnimationDate = null;
 let animationDays = 7;
 let mapBoundsSet = false; // Track if bounds have been set
 let allCoordinates = []; // Store all coordinates for bounds calculation
+const isAdmin = <?= hasRole('ADMIN') ? 'true' : 'false' ?>; // Check if current user is admin
+const userLocation = <?= !empty($user['latitude']) && !empty($user['longitude']) ? json_encode(['lat' => (float)$user['latitude'], 'lng' => (float)$user['longitude']]) : 'null' ?>;
+let userLocationMarker = null;
+let userLocationMarkerModal = null;
+let gpsLocation = null; // Store GPS location from device
 
 function initMap() {
-    map = L.map('map').setView([-33.7, 26.7], 13);
+    // Initialize map - center on user location if available, otherwise use default
+    let initialCenter = [-33.7, 26.7];
+    let initialZoom = 13;
+    
+    if (userLocation) {
+        initialCenter = [userLocation.lat, userLocation.lng];
+        // Calculate zoom level for 2km radius
+        // At the equator, 1 degree ≈ 111 km, so 2km ≈ 0.018 degrees
+        // We'll use a bounding box approach to ensure 2km radius is visible
+        const radiusKm = 2;
+        const latRadius = radiusKm / 111; // Approximate degrees for latitude
+        const lngRadius = radiusKm / (111 * Math.cos(userLocation.lat * Math.PI / 180)); // Adjust for longitude
+        
+        // Create a bounding box for 2km radius
+        const bounds = L.latLngBounds(
+            [userLocation.lat - latRadius, userLocation.lng - lngRadius],
+            [userLocation.lat + latRadius, userLocation.lng + lngRadius]
+        );
+        
+        map = L.map('map').fitBounds(bounds);
+    } else {
+        map = L.map('map').setView(initialCenter, initialZoom);
+    }
     
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors'
     }).addTo(map);
+    
+    // Add user location marker if available
+    if (userLocation) {
+        // Use Leaflet's default pin icon for user location
+        const userLocationIcon = L.icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+            iconSize: [25, 41],
+            iconAnchor: [12, 41],
+            popupAnchor: [1, -34],
+            shadowSize: [41, 41]
+        });
+        
+        userLocationMarker = L.marker([userLocation.lat, userLocation.lng], {icon: userLocationIcon}).addTo(map);
+        userLocationMarker.bindPopup('Your Location');
+    }
     
     // Load initial data and set bounds
     loadWaterData('<?= $selectedDate ?>', true);
@@ -370,9 +479,9 @@ function loadDate() {
 function createWaterIcon(color) {
     return L.divIcon({
         className: 'water-marker',
-        html: `<div style="background-color: ${color}; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-        iconSize: [20, 20],
-        iconAnchor: [10, 10]
+        html: `<div style="background-color: ${color}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 1px 2px rgba(0,0,0,0.3);"></div>`,
+        iconSize: [12, 12],
+        iconAnchor: [6, 6]
     });
 }
 
@@ -381,7 +490,15 @@ const orangeIcon = createWaterIcon('#f39c12'); // Orange for intermittent
 const redIcon = createWaterIcon('#dc3545');   // Red for no water
 
 function loadWaterData(date, setBounds = false) {
-    fetch('<?= baseUrl('/api/water-data.php') ?>?date=' + date)
+    // Add cache-busting parameter to prevent iOS caching issues
+    const cacheBuster = '&_t=' + Date.now();
+    fetch('<?= baseUrl('/api/water-data.php') ?>?date=' + date + cacheBuster, {
+        cache: 'no-store',
+        headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+        }
+    })
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -412,17 +529,43 @@ function loadWaterData(date, setBounds = false) {
                             status = 'No Water';
                         }
                         
+                        // Build popup content - show user name for admins
+                        let popupContent = status;
+                        if (isAdmin) {
+                            if (report.user_id && report.name && report.name !== 'Imported Data') {
+                                const fullName = (report.name + ' ' + (report.surname || '')).trim();
+                                const editUrl = '<?= baseUrl('/admin/edit-user.php?id=') ?>' + report.user_id;
+                                popupContent = `<a href="${editUrl}" target="_blank" style="text-decoration: none; color: #2c5f8d; font-weight: 600;">${fullName}</a><br>${status}`;
+                            } else {
+                                // For imported data or records without user
+                                popupContent = status;
+                            }
+                        }
+                        
                         const marker = L.marker([report.latitude, report.longitude], {icon: icon}).addTo(map);
-                        marker.bindPopup(status);
+                        marker.bindPopup(popupContent);
                         markers.push(marker);
                     }
                 });
                 
                 // Only set bounds if requested and we have markers
-                if (setBounds && markers.length > 0) {
+                // But if user location is available, keep centered on user with 2km radius
+                if (setBounds && markers.length > 0 && !userLocation) {
                     const group = new L.featureGroup(markers);
                     map.fitBounds(group.getBounds().pad(0.1));
                     mapBoundsSet = true;
+                } else if (userLocation && map) {
+                    // Keep map centered on user location with 2km radius
+                    const radiusKm = 2;
+                    const latRadius = radiusKm / 111;
+                    const lngRadius = radiusKm / (111 * Math.cos(userLocation.lat * Math.PI / 180));
+                    
+                    const bounds = L.latLngBounds(
+                        [userLocation.lat - latRadius, userLocation.lng - lngRadius],
+                        [userLocation.lat + latRadius, userLocation.lng + lngRadius]
+                    );
+                    
+                    map.fitBounds(bounds);
                 }
             }
         })
@@ -450,7 +593,13 @@ function loadAllDataPointsForBounds(days) {
     while (currentDate <= endDate) {
         const dateStr = currentDate.toISOString().split('T')[0];
         datePromises.push(
-            fetch('<?= baseUrl('/api/water-data.php') ?>?date=' + dateStr)
+            fetch('<?= baseUrl('/api/water-data.php') ?>?date=' + dateStr + '&_t=' + Date.now(), {
+                cache: 'no-store',
+                headers: {
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache'
+                }
+            })
                 .then(response => response.json())
                 .then(data => {
                     if (data.success && data.reports) {
@@ -641,11 +790,47 @@ function closeAnimationModal() {
 }
 
 function initModalMap() {
-    mapModal = L.map('map-modal').setView([-33.7, 26.7], 13);
+    // Initialize modal map - center on user location if available, otherwise use default
+    let initialCenter = [-33.7, 26.7];
+    let initialZoom = 13;
+    
+    if (userLocation) {
+        initialCenter = [userLocation.lat, userLocation.lng];
+        // Calculate zoom level for 2km radius
+        const radiusKm = 2;
+        const latRadius = radiusKm / 111; // Approximate degrees for latitude
+        const lngRadius = radiusKm / (111 * Math.cos(userLocation.lat * Math.PI / 180)); // Adjust for longitude
+        
+        // Create a bounding box for 2km radius
+        const bounds = L.latLngBounds(
+            [userLocation.lat - latRadius, userLocation.lng - lngRadius],
+            [userLocation.lat + latRadius, userLocation.lng + lngRadius]
+        );
+        
+        mapModal = L.map('map-modal').fitBounds(bounds);
+    } else {
+        mapModal = L.map('map-modal').setView(initialCenter, initialZoom);
+    }
     
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors'
     }).addTo(mapModal);
+    
+    // Add user location marker if available
+    if (userLocation) {
+        // Use Leaflet's default pin icon for user location
+        const userLocationIcon = L.icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+            iconSize: [25, 41],
+            iconAnchor: [12, 41],
+            popupAnchor: [1, -34],
+            shadowSize: [41, 41]
+        });
+        
+        userLocationMarkerModal = L.marker([userLocation.lat, userLocation.lng], {icon: userLocationIcon}).addTo(mapModal);
+        userLocationMarkerModal.bindPopup('Your Location');
+    }
 }
 
 function loadDateModal() {
@@ -668,7 +853,15 @@ function loadDateModal() {
 }
 
 function loadWaterDataModal(date, setBounds = false) {
-    fetch('<?= baseUrl('/api/water-data.php') ?>?date=' + date)
+    // Add cache-busting parameter to prevent iOS caching issues
+    const cacheBuster = '&_t=' + Date.now();
+    fetch('<?= baseUrl('/api/water-data.php') ?>?date=' + date + cacheBuster, {
+        cache: 'no-store',
+        headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+        }
+    })
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -700,17 +893,43 @@ function loadWaterDataModal(date, setBounds = false) {
                             status = 'No Water';
                         }
                         
+                        // Build popup content - show user name for admins
+                        let popupContent = status;
+                        if (isAdmin) {
+                            if (report.user_id && report.name && report.name !== 'Imported Data') {
+                                const fullName = (report.name + ' ' + (report.surname || '')).trim();
+                                const editUrl = '<?= baseUrl('/admin/edit-user.php?id=') ?>' + report.user_id;
+                                popupContent = `<a href="${editUrl}" target="_blank" style="text-decoration: none; color: #2c5f8d; font-weight: 600;">${fullName}</a><br>${status}`;
+                            } else {
+                                // For imported data or records without user
+                                popupContent = status;
+                            }
+                        }
+                        
                         const marker = L.marker([report.latitude, report.longitude], {icon: icon}).addTo(mapModal);
-                        marker.bindPopup(status);
+                        marker.bindPopup(popupContent);
                         markersModal.push(marker);
                     }
                 });
                 
                 // Only set bounds if requested and we have markers
-                if (setBounds && markersModal.length > 0) {
+                // But if user location is available, keep centered on user with 2km radius
+                if (setBounds && markersModal.length > 0 && !userLocation) {
                     const group = new L.featureGroup(markersModal);
                     mapModal.fitBounds(group.getBounds().pad(0.1));
                     mapBoundsSet = true;
+                } else if (userLocation && mapModal) {
+                    // Keep map centered on user location with 2km radius
+                    const radiusKm = 2;
+                    const latRadius = radiusKm / 111;
+                    const lngRadius = radiusKm / (111 * Math.cos(userLocation.lat * Math.PI / 180));
+                    
+                    const bounds = L.latLngBounds(
+                        [userLocation.lat - latRadius, userLocation.lng - lngRadius],
+                        [userLocation.lat + latRadius, userLocation.lng + lngRadius]
+                    );
+                    
+                    mapModal.fitBounds(bounds);
                 }
             }
         })
@@ -738,7 +957,13 @@ function loadAllDataPointsForBoundsModal(days) {
     while (currentDate <= endDate) {
         const dateStr = currentDate.toISOString().split('T')[0];
         datePromises.push(
-            fetch('<?= baseUrl('/api/water-data.php') ?>?date=' + dateStr)
+            fetch('<?= baseUrl('/api/water-data.php') ?>?date=' + dateStr + '&_t=' + Date.now(), {
+                cache: 'no-store',
+                headers: {
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache'
+                }
+            })
                 .then(response => response.json())
                 .then(data => {
                     if (data.success && data.reports) {
@@ -795,8 +1020,37 @@ function animateWaterDataModal() {
     mapBoundsSet = false;
     allCoordinates = [];
     
+    // First, set map to center on user location with 2km radius if available
+    if (userLocation && mapModal) {
+        const radiusKm = 2;
+        const latRadius = radiusKm / 111; // Approximate degrees for latitude
+        const lngRadius = radiusKm / (111 * Math.cos(userLocation.lat * Math.PI / 180)); // Adjust for longitude
+        
+        // Create a bounding box for 2km radius
+        const bounds = L.latLngBounds(
+            [userLocation.lat - latRadius, userLocation.lng - lngRadius],
+            [userLocation.lat + latRadius, userLocation.lng + lngRadius]
+        );
+        
+        mapModal.fitBounds(bounds);
+    }
+    
     // First, load all data points to calculate bounds
     loadAllDataPointsForBoundsModal(animationDays).then(() => {
+        // Reset to user location with 2km radius after loading bounds
+        if (userLocation && mapModal) {
+            const radiusKm = 2;
+            const latRadius = radiusKm / 111;
+            const lngRadius = radiusKm / (111 * Math.cos(userLocation.lat * Math.PI / 180));
+            
+            const bounds = L.latLngBounds(
+                [userLocation.lat - latRadius, userLocation.lng - lngRadius],
+                [userLocation.lat + latRadius, userLocation.lng + lngRadius]
+            );
+            
+            mapModal.fitBounds(bounds);
+        }
+        
         // Now start the animation
         function formatDate(date) {
             const d = new Date(date);
@@ -840,6 +1094,32 @@ document.addEventListener('click', function(event) {
     }
 });
 
+// Tab switching function
+function switchTab(tabName) {
+    // Hide all tabs
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Remove active class from all buttons
+    document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // Show selected tab
+    if (tabName === 'tracking') {
+        document.getElementById('tracking-tab').classList.add('active');
+        document.querySelectorAll('.tab-button')[0].classList.add('active');
+        // Initialize map if not already initialized
+        if (typeof L !== 'undefined' && !map) {
+            initMap();
+        }
+    } else if (tabName === 'my-reports') {
+        document.getElementById('my-reports-tab').classList.add('active');
+        document.querySelectorAll('.tab-button')[1].classList.add('active');
+    }
+}
+
 // Initialize map when page loads and Leaflet is ready
 document.addEventListener('DOMContentLoaded', function() {
     // Wait a bit to ensure Leaflet is fully loaded
@@ -857,6 +1137,46 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 </script>
+
+<style>
+.water-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 2rem;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.tab-button {
+    padding: 0.75rem 1.5rem;
+    background: none;
+    border: none;
+    border-bottom: 3px solid transparent;
+    cursor: pointer;
+    font-size: 1rem;
+    color: #666;
+    transition: all 0.3s;
+    margin-bottom: -2px;
+}
+
+.tab-button:hover {
+    color: var(--primary-color);
+    background-color: var(--bg-color);
+}
+
+.tab-button.active {
+    color: var(--primary-color);
+    border-bottom-color: var(--primary-color);
+    font-weight: 600;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+</style>
 
 <?php 
 $hideAdverts = false;

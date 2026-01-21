@@ -35,7 +35,7 @@ Using FTP or File Manager, create these directories and set permissions:
 ```
 uploads/
 uploads/news/
-uploads/adverts/
+uploads/graphics/
 ```
 
 Set permissions to 755 for directories.

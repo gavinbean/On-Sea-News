@@ -7,3 +7,4 @@ DROP INDEX `email`;
 -- Note: The email column will still have an index for performance, but it won't enforce uniqueness
 
 
+

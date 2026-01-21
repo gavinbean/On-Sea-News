@@ -40,8 +40,8 @@ Community website for Bushmans River Mouth and Kenton on Sea.
 5. **Create upload directories**:
    ```bash
    mkdir -p uploads/news
-   mkdir -p uploads/adverts
-   chmod 755 uploads uploads/news uploads/adverts
+   mkdir -p uploads/graphics
+   chmod 755 uploads uploads/news uploads/graphics
    ```
 
 6. **Set file permissions**:

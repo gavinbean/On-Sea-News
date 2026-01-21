@@ -8,6 +8,7 @@ $message = '';
 $error = '';
 $results = [];
 $waterMigrationResults = [];
+$singleUserResult = null;
 
 // Handle re-geocoding request
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'regeocode') {
@@ -162,6 +163,199 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $message = "Dry run completed: Would update {$updated} addresses, {$failed} failed, {$skipped} skipped out of {$processed} total users.";
     } else {
         $message = "Re-geocoding completed: Updated {$updated} addresses, {$failed} failed, {$skipped} skipped out of {$processed} total users.";
+    }
+}
+
+// Handle single user geocoding check
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'check_user_geocode') {
+    $userId = isset($_POST['user_id']) ? (int)$_POST['user_id'] : 0;
+    $updateUser = isset($_POST['update_user']) && $_POST['update_user'] === '1';
+    $updateWaterRecords = isset($_POST['update_water_records']) && $_POST['update_water_records'] === '1';
+    
+    if ($userId <= 0) {
+        $error = 'Please select a user.';
+    } else {
+        // Get user details
+        $stmt = $db->prepare("
+            SELECT user_id, username, name, surname, street_number, street_name, suburb, town, latitude, longitude
+            FROM " . TABLE_PREFIX . "users
+            WHERE user_id = ?
+        ");
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch();
+        
+        if (!$user) {
+            $error = 'User not found.';
+        } else {
+            // Check if user has address
+            if (empty($user['street_name']) || empty($user['town'])) {
+                $error = 'User does not have a complete address.';
+            } else {
+                // Re-geocode the address
+                $geocodeResult = validateAndGeocodeAddress([
+                    'street_number' => $user['street_number'] ?? '',
+                    'street_name' => $user['street_name'],
+                    'suburb' => $user['suburb'] ?? '',
+                    'town' => $user['town']
+                ]);
+                
+                if ($geocodeResult['success'] && !empty($geocodeResult['latitude']) && !empty($geocodeResult['longitude'])) {
+                    $newLat = round((float)$geocodeResult['latitude'], 6);
+                    $newLon = round((float)$geocodeResult['longitude'], 6);
+                    $oldLat = $user['latitude'] ? round((float)$user['latitude'], 6) : null;
+                    $oldLon = $user['longitude'] ? round((float)$user['longitude'], 6) : null;
+                    
+                    // Check if coordinates changed
+                    $coordsChanged = false;
+                    if (empty($oldLat) || empty($oldLon)) {
+                        $coordsChanged = true;
+                    } else {
+                        // Check if coordinates are significantly different (more than 0.001 degrees, roughly 100m)
+                        $latDiff = abs($oldLat - $newLat);
+                        $lonDiff = abs($oldLon - $newLon);
+                        if ($latDiff > 0.001 || $lonDiff > 0.001) {
+                            $coordsChanged = true;
+                        }
+                    }
+                    
+                    $singleUserResult = [
+                        'user_id' => $user['user_id'],
+                        'username' => $user['username'],
+                        'name' => trim(($user['name'] ?? '') . ' ' . ($user['surname'] ?? '')),
+                        'address' => trim(($user['street_number'] ?? '') . ' ' . $user['street_name']) . ', ' . $user['town'],
+                        'old_lat' => $oldLat,
+                        'old_lon' => $oldLon,
+                        'new_lat' => $newLat,
+                        'new_lon' => $newLon,
+                        'coords_changed' => $coordsChanged,
+                        'approximate' => isset($geocodeResult['approximate']) && $geocodeResult['approximate'],
+                        'has_house_number' => isset($geocodeResult['has_house_number']) ? $geocodeResult['has_house_number'] : null
+                    ];
+                    
+                    // Update user if requested and coordinates changed
+                    if ($updateUser && $coordsChanged) {
+                        $db->beginTransaction();
+                        try {
+                            // Update user coordinates
+                            $updateStmt = $db->prepare("
+                                UPDATE " . TABLE_PREFIX . "users
+                                SET latitude = ?, longitude = ?
+                                WHERE user_id = ?
+                            ");
+                            $updateStmt->execute([$newLat, $newLon, $userId]);
+                            
+                            $waterRecordsUpdated = 0;
+                            // Update water records if requested
+                            if ($updateWaterRecords) {
+                                // Get all water records for this user
+                                $waterStmt = $db->prepare("
+                                    SELECT water_id, report_date, latitude, longitude
+                                    FROM " . TABLE_PREFIX . "water_availability
+                                    WHERE user_id = ?
+                                ");
+                                $waterStmt->execute([$userId]);
+                                $waterRecords = $waterStmt->fetchAll();
+                                
+                                foreach ($waterRecords as $waterRecord) {
+                                    // Check if this record needs updating (different coordinates or no coordinates)
+                                    $needsUpdate = false;
+                                    if (empty($waterRecord['latitude']) || empty($waterRecord['longitude'])) {
+                                        $needsUpdate = true;
+                                    } else {
+                                        $waterLat = round((float)$waterRecord['latitude'], 6);
+                                        $waterLon = round((float)$waterRecord['longitude'], 6);
+                                        $latDiff = abs($waterLat - $oldLat);
+                                        $lonDiff = abs($waterLon - $oldLon);
+                                        // Update if coordinates match old user coordinates (within tolerance)
+                                        if (($oldLat && abs($waterLat - $oldLat) < 0.0001) && ($oldLon && abs($waterLon - $oldLon) < 0.0001)) {
+                                            $needsUpdate = true;
+                                        }
+                                    }
+                                    
+                                    if ($needsUpdate) {
+                                        // Use SELECT FOR UPDATE to prevent race conditions
+                                        $checkStmt = $db->prepare("
+                                            SELECT water_id 
+                                            FROM " . TABLE_PREFIX . "water_availability 
+                                            WHERE water_id = ?
+                                            FOR UPDATE
+                                        ");
+                                        $checkStmt->execute([$waterRecord['water_id']]);
+                                        
+                                        // Check if another record exists at this location/date
+                                        $duplicateStmt = $db->prepare("
+                                            SELECT water_id 
+                                            FROM " . TABLE_PREFIX . "water_availability 
+                                            WHERE water_id != ? 
+                                            AND report_date = ?
+                                            AND ABS(latitude - ?) < 0.000001
+                                            AND ABS(longitude - ?) < 0.000001
+                                            AND latitude IS NOT NULL
+                                            AND longitude IS NOT NULL
+                                            LIMIT 1
+                                        ");
+                                        $duplicateStmt->execute([$waterRecord['water_id'], $waterRecord['report_date'], $newLat, $newLon]);
+                                        $duplicate = $duplicateStmt->fetch();
+                                        
+                                        if ($duplicate) {
+                                            // Merge with existing record
+                                            $mergeStmt = $db->prepare("
+                                                UPDATE " . TABLE_PREFIX . "water_availability 
+                                                SET user_id = ?, reported_at = NOW()
+                                                WHERE water_id = ?
+                                            ");
+                                            $mergeStmt->execute([$userId, $duplicate['water_id']]);
+                                            
+                                            $deleteStmt = $db->prepare("DELETE FROM " . TABLE_PREFIX . "water_availability WHERE water_id = ?");
+                                            $deleteStmt->execute([$waterRecord['water_id']]);
+                                        } else {
+                                            // Update the record with new coordinates
+                                            $updateWaterStmt = $db->prepare("
+                                                UPDATE " . TABLE_PREFIX . "water_availability 
+                                                SET latitude = ?, longitude = ?, reported_at = NOW()
+                                                WHERE water_id = ?
+                                            ");
+                                            $updateWaterStmt->execute([$newLat, $newLon, $waterRecord['water_id']]);
+                                        }
+                                        
+                                        $waterRecordsUpdated++;
+                                    }
+                                }
+                            }
+                            
+                            $db->commit();
+                            $singleUserResult['status'] = 'updated';
+                            $singleUserResult['water_records_updated'] = $waterRecordsUpdated;
+                            $message = "User geocoding updated successfully. ";
+                            if ($updateWaterRecords) {
+                                $message .= "Updated {$waterRecordsUpdated} water availability record(s).";
+                            }
+                        } catch (Exception $e) {
+                            $db->rollBack();
+                            $error = "Error updating user geocoding: " . $e->getMessage();
+                            error_log("Single user geocoding error: " . $e->getMessage());
+                            $singleUserResult['status'] = 'error';
+                            $singleUserResult['error'] = $e->getMessage();
+                        }
+                    } else {
+                        $singleUserResult['status'] = 'checked';
+                        if (!$coordsChanged) {
+                            $singleUserResult['message'] = 'Coordinates unchanged.';
+                        }
+                    }
+                } else {
+                    $error = 'Geocoding failed: ' . ($geocodeResult['message'] ?? 'Unknown error');
+                    $singleUserResult = [
+                        'user_id' => $user['user_id'],
+                        'username' => $user['username'],
+                        'name' => trim(($user['name'] ?? '') . ' ' . ($user['surname'] ?? '')),
+                        'address' => trim(($user['street_number'] ?? '') . ' ' . $user['street_name']) . ', ' . $user['town'],
+                        'status' => 'failed',
+                        'reason' => $geocodeResult['message'] ?? 'Geocoding failed'
+                    ];
+                }
+            }
+        }
     }
 }
 
@@ -360,10 +554,133 @@ include __DIR__ . '/../includes/header.php';
             
             <div class="alert alert-info">
                 <strong>Note:</strong> This script will re-geocode all user addresses using the updated geocoding function that includes street numbers. 
-                The process respects Nominatim rate limits (1 request per second), so it may take some time to complete.
+                <?php
+                $provider = defined('GEOCODING_PROVIDER') ? GEOCODING_PROVIDER : 'nominatim';
+                $useGoogleForHouseNumbers = defined('USE_GOOGLE_FOR_HOUSE_NUMBERS') ? USE_GOOGLE_FOR_HOUSE_NUMBERS : false;
+                $hasGoogleKey = defined('GOOGLE_MAPS_API_KEY') && !empty(GOOGLE_MAPS_API_KEY);
+                
+                if ($provider === 'google' && $hasGoogleKey) {
+                    echo '<br><strong>Geocoding Provider:</strong> Google Maps Geocoding API (primary)';
+                } elseif ($useGoogleForHouseNumbers && $hasGoogleKey) {
+                    echo '<br><strong>Geocoding Provider:</strong> Hybrid mode - Google Maps for addresses with house numbers, Nominatim otherwise';
+                } else {
+                    echo '<br><strong>Geocoding Provider:</strong> Nominatim (OpenStreetMap)';
+                    if ($hasGoogleKey) {
+                        echo ' (Google Maps API key is configured but not set as primary provider)';
+                    }
+                }
+                if ($provider !== 'google' && !$useGoogleForHouseNumbers) {
+                    echo '<br>The process respects Nominatim rate limits (1 request per second), so it may take some time to complete.';
+                }
+                ?>
+                <br><br>
+                <strong>House Number Handling:</strong> If an address has a house number but the geocoding result doesn't include it, the system will automatically try the alternative provider (Google/Nominatim) to get a more precise result.
                 <br><br>
                 <strong>Dry Run:</strong> Check the "Dry Run" option to see what would be updated without actually making changes.
             </div>
+        </div>
+        
+        <div class="regeocode-form">
+            <h2>Check Single User Geocoding</h2>
+            <form method="POST" action="" id="single-user-form">
+                <input type="hidden" name="action" value="check_user_geocode">
+                
+                <div class="form-group">
+                    <label for="user_id">Select User:</label>
+                    <select id="user_id" name="user_id" required style="width: 100%; padding: 0.5rem; font-size: 1rem;">
+                        <option value="">-- Select a user --</option>
+                        <?php
+                        $usersStmt = $db->query("
+                            SELECT user_id, username, name, surname, street_number, street_name, town
+                            FROM " . TABLE_PREFIX . "users
+                            WHERE street_name IS NOT NULL 
+                            AND street_name != ''
+                            AND town IS NOT NULL
+                            AND town != ''
+                            AND is_active = 1
+                            ORDER BY name, surname, username
+                        ");
+                        $allUsers = $usersStmt->fetchAll();
+                        foreach ($allUsers as $u):
+                            $displayName = trim(($u['name'] ?? '') . ' ' . ($u['surname'] ?? '')) ?: $u['username'];
+                            $address = trim(($u['street_number'] ?? '') . ' ' . $u['street_name']) . ', ' . $u['town'];
+                        ?>
+                            <option value="<?= $u['user_id'] ?>" <?= isset($singleUserResult) && isset($singleUserResult['user_id']) && $singleUserResult['user_id'] == $u['user_id'] ? 'selected' : '' ?>>
+                                <?= h($displayName) ?> - <?= h($address) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <button type="submit" class="btn btn-primary" name="check_only" value="1">Check Geocoding</button>
+                </div>
+            </form>
+            
+            <?php if (isset($singleUserResult) && $singleUserResult['status'] === 'checked'): ?>
+                <div class="single-user-result" style="margin-top: 2rem; padding: 1.5rem; background-color: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                    <h3>Geocoding Check Results</h3>
+                    <p><strong>User:</strong> <?= h($singleUserResult['name']) ?> (<?= h($singleUserResult['username']) ?>)</p>
+                    <p><strong>Address:</strong> <?= h($singleUserResult['address']) ?></p>
+                    <p><strong>Current Coordinates:</strong> 
+                        <?php if ($singleUserResult['old_lat'] && $singleUserResult['old_lon']): ?>
+                            <?= number_format($singleUserResult['old_lat'], 6) ?>, <?= number_format($singleUserResult['old_lon'], 6) ?>
+                        <?php else: ?>
+                            <span style="color: #dc3545;">None</span>
+                        <?php endif; ?>
+                    </p>
+                    <p><strong>New Coordinates:</strong> 
+                        <?= number_format($singleUserResult['new_lat'], 6) ?>, <?= number_format($singleUserResult['new_lon'], 6) ?>
+                    </p>
+                    
+                    <?php if ($singleUserResult['coords_changed']): ?>
+                        <div style="background-color: #fff3cd; padding: 1rem; border-radius: 4px; margin: 1rem 0; border-left: 4px solid #ffc107;">
+                            <strong>⚠️ Coordinates have changed!</strong>
+                            <form method="POST" action="" style="margin-top: 1rem;">
+                                <input type="hidden" name="action" value="check_user_geocode">
+                                <input type="hidden" name="user_id" value="<?= $singleUserResult['user_id'] ?>">
+                                <input type="hidden" name="update_user" value="1">
+                                
+                                <div class="form-group" style="margin-bottom: 1rem;">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" name="update_water_records" value="1">
+                                        Also update all water availability records for this user
+                                    </label>
+                                </div>
+                                
+                                <button type="submit" class="btn btn-primary">Update User Coordinates</button>
+                            </form>
+                        </div>
+                    <?php else: ?>
+                        <div style="background-color: #d4edda; padding: 1rem; border-radius: 4px; margin: 1rem 0; border-left: 4px solid #28a745;">
+                            <strong>✓ Coordinates are unchanged.</strong>
+                        </div>
+                    <?php endif; ?>
+                    
+                    <?php if (isset($singleUserResult['approximate']) && $singleUserResult['approximate']): ?>
+                        <p style="color: #856404; font-style: italic; margin-top: 0.5rem;">
+                            <small>Note: This is an approximate location</small>
+                        </p>
+                    <?php endif; ?>
+                    
+                    <?php if (isset($singleUserResult['has_house_number'])): ?>
+                        <p style="margin-top: 0.5rem;">
+                            <small><strong>House number in result:</strong> 
+                                <?= $singleUserResult['has_house_number'] ? '<span style="color: green;">✓ Yes</span>' : '<span style="color: orange;">✗ No</span>' ?>
+                            </small>
+                        </p>
+                    <?php endif; ?>
+                </div>
+            <?php elseif (isset($singleUserResult) && $singleUserResult['status'] === 'updated'): ?>
+                <div class="single-user-result" style="margin-top: 2rem; padding: 1.5rem; background-color: #d4edda; border-radius: 8px; border: 1px solid #28a745;">
+                    <h3>✓ Update Successful</h3>
+                    <p><strong>User:</strong> <?= h($singleUserResult['name']) ?> (<?= h($singleUserResult['username']) ?>)</p>
+                    <p><strong>New Coordinates:</strong> <?= number_format($singleUserResult['new_lat'], 6) ?>, <?= number_format($singleUserResult['new_lon'], 6) ?></p>
+                    <?php if (isset($singleUserResult['water_records_updated'])): ?>
+                        <p><strong>Water Records Updated:</strong> <?= $singleUserResult['water_records_updated'] ?></p>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
         </div>
         
         <div class="regeocode-form">

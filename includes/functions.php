@@ -50,6 +50,14 @@ function isLoggedIn() {
         $result = $stmt->fetch();
         
         if ($result) {
+            // Update last_used_at timestamp
+            $updateStmt = $db->prepare("
+                UPDATE " . TABLE_PREFIX . "remember_tokens 
+                SET last_used_at = NOW() 
+                WHERE token_hash = ?
+            ");
+            $updateStmt->execute([$tokenHash]);
+            
             // CRITICAL SECURITY: Regenerate session ID when auto-logging in via remember me
             // This prevents session fixation attacks
             session_regenerate_id(true);

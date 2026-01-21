@@ -4,6 +4,9 @@ requireRole('ANALYTICS');
 
 header('Content-Type: application/json');
 
+$fromDate = $_GET['from'] ?? date('Y-m-d', strtotime('-30 days'));
+$toDate = $_GET['to'] ?? date('Y-m-d');
+
 $db = getDB();
 
 // Get all active water questions
@@ -18,14 +21,15 @@ $questions = $stmt->fetchAll();
 $results = [];
 
 foreach ($questions as $question) {
-    // Get all responses for this question
+    // Get all responses for this question within date range
     $stmt = $db->prepare("
         SELECT response_value, COUNT(*) as count
         FROM " . TABLE_PREFIX . "water_user_responses
         WHERE question_id = ?
+        AND DATE(created_at) BETWEEN ? AND ?
         GROUP BY response_value
     ");
-    $stmt->execute([$question['question_id']]);
+    $stmt->execute([$question['question_id'], $fromDate, $toDate]);
     $responses = $stmt->fetchAll();
     
     // Calculate total responses
@@ -45,8 +49,9 @@ foreach ($questions as $question) {
             SELECT response_value
             FROM " . TABLE_PREFIX . "water_user_responses
             WHERE question_id = ?
+            AND DATE(created_at) BETWEEN ? AND ?
         ");
-        $stmt->execute([$question['question_id']]);
+        $stmt->execute([$question['question_id'], $fromDate, $toDate]);
         $allResponses = $stmt->fetchAll();
         
         $answerCounts = [];
